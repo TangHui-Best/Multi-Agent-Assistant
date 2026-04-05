@@ -1,4 +1,5 @@
 import type { AgentParticipant, IncomingUserMessage, RoomMode } from '../../shared/protocol'
+import type { RoomAdapter } from '../adapters/types'
 import { canReply, type ControlledRound } from './orchestrator'
 
 interface RoomState {
@@ -11,6 +12,7 @@ export function createRoomService() {
     mode: 'open',
     agents: []
   }
+  const adapters = new Map<string, RoomAdapter>()
   let controlledRound: ControlledRound | null = null
   let lastRoundResult: 'completed' | 'timed_out' | null = null
 
@@ -56,6 +58,18 @@ export function createRoomService() {
 
       lastRoundResult = 'timed_out'
       controlledRound = null
+    },
+    registerAdapter(adapter: RoomAdapter) {
+      adapters.set(adapter.agentId, adapter)
+    },
+    async dispatchToAgent(agentId: string, message: string) {
+      const adapter = adapters.get(agentId)
+
+      if (!adapter) {
+        throw new Error(`Missing adapter for ${agentId}`)
+      }
+
+      return adapter.send(message)
     },
     getSnapshot() {
       return {
