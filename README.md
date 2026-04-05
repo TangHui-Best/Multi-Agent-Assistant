@@ -1,10 +1,4 @@
-# Multi-Agent Assi
+# Multi-Codex Room
 
-Local-first desktop collaboration layer for running multiple CodexCLI sessions in one shared room without manual copy-paste relay.
-
-## Current Status
-
-- product spec written
-- implementation plan written
-- repository baseline initialized for Git/GitHub workflow
+A local desktop app for running multiple CodexCLI perspectives inside one shared room without manual copy-paste relay.
 
