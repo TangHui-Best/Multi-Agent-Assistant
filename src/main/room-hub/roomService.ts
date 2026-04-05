@@ -1,4 +1,5 @@
 import type { AgentParticipant, IncomingUserMessage, RoomMode } from '../../shared/protocol'
+import { canReply, type ControlledRound } from './orchestrator'
 
 interface RoomState {
   mode: RoomMode
@@ -10,6 +11,8 @@ export function createRoomService() {
     mode: 'open',
     agents: []
   }
+  let controlledRound: ControlledRound | null = null
+  let lastRoundResult: 'completed' | 'timed_out' | null = null
 
   return {
     seedAgents(agents: AgentParticipant[]) {
@@ -25,6 +28,40 @@ export function createRoomService() {
         roomId: message.roomId,
         messageBody: message.body,
         recipientIds
+      }
+    },
+    startControlledRound(input: Omit<ControlledRound, 'repliesUsed'>) {
+      lastRoundResult = null
+      controlledRound = { ...input, repliesUsed: 0 }
+    },
+    canAgentReply(agentId: string) {
+      return canReply(controlledRound, agentId)
+    },
+    recordAgentReply(agentId: string) {
+      if (!controlledRound || !canReply(controlledRound, agentId)) {
+        return
+      }
+
+      controlledRound.repliesUsed += 1
+
+      if (controlledRound.repliesUsed >= controlledRound.replyBudget) {
+        lastRoundResult = 'completed'
+        controlledRound = null
+      }
+    },
+    markRoundTimedOut() {
+      if (!controlledRound) {
+        return
+      }
+
+      lastRoundResult = 'timed_out'
+      controlledRound = null
+    },
+    getSnapshot() {
+      return {
+        mode: controlledRound ? 'controlled' : 'open' as RoomMode,
+        agents: state.agents,
+        lastRoundResult
       }
     }
   }
