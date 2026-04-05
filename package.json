@@ -13,7 +13,6 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "electron": "^35.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -34,4 +33,3 @@
     "vitest": "^3.0.8"
   }
 }
-
