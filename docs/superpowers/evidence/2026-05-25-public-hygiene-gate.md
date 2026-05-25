@@ -1,0 +1,75 @@
+---
+id: EV-2026-05-25-public-hygiene-gate
+doc_kind: evidence
+scope: project
+feature_refs: []
+created: 2026-05-25
+---
+
+# EV-2026-05-25: Public Hygiene Gate
+
+## Scope
+
+验证 Phase 0 Public Hygiene Gate：
+
+- 公开仓库具备可重复运行的私有参考来源痕迹扫描器。
+- 真实私有来源 denylist 不进入公开仓库。
+- GitHub Actions 可以在 push 和 pull request 上运行公开扫描门禁。
+- 本地和 CI 可以通过 secret/env 注入私有来源模式。
+
+## Commands
+
+```text
+python -m unittest tests.test_public_hygiene
+python scripts/public_hygiene.py --root .
+$env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<secret pattern not committed to this repository>'; python scripts/public_hygiene.py --root .
+python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+```
+
+## Results
+
+Result: Pass for the implemented public hygiene gate.
+
+Observed implementation:
+
+- Scanner: `scripts/public_hygiene.py`
+- Unit tests: `tests/test_public_hygiene.py`
+- Public config: `.public-hygiene/forbidden-patterns.txt`
+- Local secret config: `.public-hygiene/forbidden-patterns.local.txt` ignored by Git
+- CI workflow: `.github/workflows/public-hygiene.yml`
+- CI secret input: `PUBLIC_HYGIENE_FORBIDDEN_PATTERNS`
+
+Verification results:
+
+- Unit tests passed: 4 tests.
+- Public scan passed on 17 tracked files with 0 committed public denylist rules.
+- Public scan passed on 17 tracked files with 1 env-injected rule whose value was not committed to this repository.
+- Harness knowledge check passed after adding this Evidence record.
+
+## Boundary
+
+The committed denylist intentionally contains no real private reference identifiers.
+
+This is a safety boundary, not a missing rule: committing the real private source name, URL, path, or product-specific marker would itself expose the source in public history.
+
+The effective private-source denylist must be supplied through either:
+
+- `.public-hygiene/forbidden-patterns.local.txt` on the local machine, or
+- the GitHub secret `PUBLIC_HYGIENE_FORBIDDEN_PATTERNS`.
+
+## Artifacts
+
+- `scripts/public_hygiene.py`
+- `tests/test_public_hygiene.py`
+- `.public-hygiene/forbidden-patterns.txt`
+- `.github/workflows/public-hygiene.yml`
+- `docs/superpowers/specs/2026-05-25-public-hygiene-gate.md`
+
+## Unverified
+
+- GitHub Actions has not yet run remotely for this workflow because the branch has not been pushed at the time this Evidence record is written.
+- The real private-source denylist contents were not committed or printed into this evidence.
+
+## Notes
+
+Generic wording such as "private local reference" remains allowed. The gate is meant to block source-specific traces, not the architecture principle that private references may be used for learning while the public project keeps an independent identity.
