@@ -34,4 +34,4 @@ jobs:
             commit_range="${{ github.event.before }}..${{ github.sha }}"
           fi
 
-          python scripts/public_hygiene.py --root . --require-rules --require-commit-range --commit-range "$commit_range"
+          python scripts/public_hygiene.py --root . --require-rules --require-env-rules --require-commit-range --commit-range "$commit_range"

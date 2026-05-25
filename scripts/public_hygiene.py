@@ -44,6 +44,18 @@ class Finding:
     line: int
     column: int
     rule: str
+    area: str = "content"
+    file_index: int | None = None
+
+    @property
+    def location(self):
+        if self.area == "commit":
+            return f"{self.path}:{self.line}:{self.column}"
+        if self.file_index is None:
+            return f"file:#{self.area}:{self.line}:{self.column}"
+        if self.area == "path":
+            return f"file #{self.file_index}:path:{self.column}"
+        return f"file #{self.file_index}:content:{self.line}:{self.column}"
 
 
 class _LiteralMatch:
@@ -75,16 +87,29 @@ def load_rules(pattern_files, env_value=""):
 def scan_paths(root, paths, rules):
     root = Path(root).resolve()
     findings = []
-    for path in paths:
+    for file_index, path in enumerate(paths, start=1):
         absolute_path = Path(path)
         if not absolute_path.is_absolute():
             absolute_path = root / absolute_path
         if not absolute_path.is_file():
             continue
+        relative_path = _relative_to(absolute_path, root)
+        path_text = os.fspath(relative_path).replace("\\", "/")
+        for rule in rules:
+            for match in rule.finditer(path_text):
+                findings.append(
+                    Finding(
+                        path=relative_path,
+                        line=1,
+                        column=match.start() + 1,
+                        rule=rule.label,
+                        area="path",
+                        file_index=file_index,
+                    )
+                )
         text = _read_text(absolute_path)
         if text is None:
             continue
-        relative_path = _relative_to(absolute_path, root)
         for line_number, line in enumerate(text.splitlines(), start=1):
             for rule in rules:
                 for match in rule.finditer(line):
@@ -94,6 +119,8 @@ def scan_paths(root, paths, rules):
                             line=line_number,
                             column=match.start() + 1,
                             rule=rule.label,
+                            area="content",
+                            file_index=file_index,
                         )
                     )
     return findings
@@ -132,6 +159,7 @@ def scan_commit_messages(root, rev_range, rules, require_range=False):
                             line=line_number,
                             column=match.start() + 1,
                             rule=rule.label,
+                            area="commit",
                         )
                     )
     return findings
@@ -167,6 +195,11 @@ def main(argv=None, env=None):
         action="store_true",
         help="Fail closed when no forbidden patterns are loaded.",
     )
+    parser.add_argument(
+        "--require-env-rules",
+        action="store_true",
+        help="Fail closed when no env-injected forbidden patterns are loaded.",
+    )
     args = parser.parse_args(argv)
 
     environ = os.environ if env is None else env
@@ -181,6 +214,9 @@ def main(argv=None, env=None):
     if args.require_rules and not rules:
         print("Public hygiene scan failed: no forbidden patterns were loaded.", file=sys.stderr)
         return 2
+    if args.require_env_rules and not any(rule.source == "env" for rule in rules):
+        print("Public hygiene scan failed: no env forbidden patterns were loaded.", file=sys.stderr)
+        return 2
 
     paths = [Path(path) for path in args.paths] if args.paths else _git_tracked_files(root)
     findings = scan_paths(root, paths, rules)
@@ -194,7 +230,7 @@ def main(argv=None, env=None):
     if findings:
         print("Public hygiene scan failed: private reference traces were found.", file=sys.stderr)
         for finding in findings:
-            print(f"{finding.path}:{finding.line}:{finding.column}: {finding.rule}", file=sys.stderr)
+            print(f"{finding.location}: {finding.rule}", file=sys.stderr)
         return 1
 
     print(f"Public hygiene scan passed: {len(paths)} file(s) checked, {len(rules)} rule(s) loaded.")

@@ -85,6 +85,31 @@ class PublicHygieneScannerTest(unittest.TestCase):
         self.assertNotIn(secret, stderr.getvalue())
         self.assertIn("env rule #1", stderr.getvalue())
 
+    def test_file_paths_are_scanned_and_redacted_in_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret = "PathOnlyPrivateSourceName"
+            doc = root / "docs" / f"{secret}-notes.md"
+            doc.parent.mkdir()
+            doc.write_text("clean content\n", encoding="utf-8")
+            stderr = StringIO()
+
+            rules = public_hygiene.load_rules([], env_value=secret)
+            findings = public_hygiene.scan_paths(root, [doc], rules)
+
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(
+                    ["--root", os.fspath(root), "--no-commit-messages", os.fspath(doc)],
+                    env={"PUBLIC_HYGIENE_FORBIDDEN_PATTERNS": secret},
+                )
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].area, "path")
+        self.assertEqual(exit_code, 1)
+        self.assertNotIn(secret, stderr.getvalue())
+        self.assertNotIn(os.fspath(doc.relative_to(root)), stderr.getvalue())
+        self.assertIn("file #1:path", stderr.getvalue())
+
     def test_commit_messages_are_scanned_without_echoing_secret(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -119,6 +144,32 @@ class PublicHygieneScannerTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 2)
         self.assertIn("no forbidden patterns were loaded", stderr.getvalue())
+
+    def test_require_env_rules_ignores_public_file_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "README.md"
+            doc.write_text("clean\n", encoding="utf-8")
+            public_rules = root / "public-rules.txt"
+            public_rules.write_text("NonSensitivePublicRule\n", encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(
+                    [
+                        "--root",
+                        os.fspath(root),
+                        "--patterns-file",
+                        os.fspath(public_rules),
+                        "--require-env-rules",
+                        "--no-commit-messages",
+                        os.fspath(doc),
+                    ],
+                    env={},
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("no env forbidden patterns were loaded", stderr.getvalue())
 
     def test_require_commit_range_fails_closed_when_commit_scan_cannot_run(self):
         with tempfile.TemporaryDirectory() as tmp:
