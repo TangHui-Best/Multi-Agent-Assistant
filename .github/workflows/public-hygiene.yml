@@ -1,0 +1,25 @@
+name: Public Hygiene
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  scan:
+    name: Scan public repository traces
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run public hygiene scanner
+        env:
+          PUBLIC_HYGIENE_FORBIDDEN_PATTERNS: ${{ secrets.PUBLIC_HYGIENE_FORBIDDEN_PATTERNS }}
+        run: python scripts/public_hygiene.py --root .

@@ -1,0 +1,15 @@
+# Public hygiene denylist.
+#
+# Do not commit real private reference identifiers here.
+# Put local private source names, URLs, paths, or product-specific markers in:
+#
+#   .public-hygiene/forbidden-patterns.local.txt
+#
+# CI can inject the same private denylist through:
+#
+#   PUBLIC_HYGIENE_FORBIDDEN_PATTERNS
+#
+# Supported rule formats:
+#
+#   ExactForbiddenLiteral
+#   regex:Forbidden[A-Z]+Pattern

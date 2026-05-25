@@ -1,5 +1,7 @@
+.agent/
 .superpowers/
 .worktrees/
+.public-hygiene/forbidden-patterns.local.txt
 node_modules/
 __pycache__/
 dist/
