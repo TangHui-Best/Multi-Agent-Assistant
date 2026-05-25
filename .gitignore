@@ -1,6 +1,7 @@
 .superpowers/
 .worktrees/
 node_modules/
+__pycache__/
 dist/
 out/
 coverage/
