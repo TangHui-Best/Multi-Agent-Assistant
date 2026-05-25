@@ -11,6 +11,7 @@ from pathlib import Path
 class Rule:
     source: str
     pattern: str
+    index: int
     regex: bool = False
 
     def matches(self, text):
@@ -34,7 +35,7 @@ class Rule:
     @property
     def label(self):
         kind = "regex" if self.regex else "literal"
-        return f"{kind}:{self.pattern} ({self.source})"
+        return f"{self.source} rule #{self.index} ({kind})"
 
 
 @dataclass(frozen=True)
@@ -57,12 +58,16 @@ class _LiteralMatch:
         return self._end
 
 
+class CommitMessageScanError(Exception):
+    pass
+
+
 def load_rules(pattern_files, env_value=""):
     rules = []
     for pattern_file in pattern_files:
         path = Path(pattern_file)
         if path.exists():
-            rules.extend(_rules_from_lines(path.read_text(encoding="utf-8").splitlines(), os.fspath(path)))
+            rules.extend(_rules_from_lines(path.read_text(encoding="utf-8").splitlines(), "file"))
     rules.extend(_rules_from_lines(env_value.splitlines(), "env"))
     return rules
 
@@ -94,18 +99,77 @@ def scan_paths(root, paths, rules):
     return findings
 
 
-def main(argv=None):
+def scan_commit_messages(root, rev_range, rules, require_range=False):
+    root = Path(root).resolve()
+    if not rev_range:
+        return []
+    result = subprocess.run(
+        ["git", "log", "--format=%H%x1f%B%x1e", rev_range],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if require_range:
+            raise CommitMessageScanError("commit messages could not be scanned")
+        return []
+
+    findings = []
+    for record in result.stdout.split("\x1e"):
+        record = record.strip()
+        if not record or "\x1f" not in record:
+            continue
+        commit_hash, message = record.split("\x1f", 1)
+        short_hash = commit_hash[:12]
+        virtual_path = Path(f"commit-{short_hash}.message")
+        for line_number, line in enumerate(message.splitlines(), start=1):
+            for rule in rules:
+                for match in rule.finditer(line):
+                    findings.append(
+                        Finding(
+                            path=virtual_path,
+                            line=line_number,
+                            column=match.start() + 1,
+                            rule=rule.label,
+                        )
+                    )
+    return findings
+
+
+def main(argv=None, env=None):
     parser = argparse.ArgumentParser(description="Scan public repository files for private reference traces.")
     parser.add_argument("paths", nargs="*", help="Optional file paths to scan. Defaults to git-tracked files.")
     parser.add_argument("--root", default=".", help="Repository root. Defaults to the current directory.")
+    parser.add_argument(
+        "--commit-range",
+        default="origin/main..HEAD",
+        help="Git revision range whose commit messages should be scanned. Defaults to origin/main..HEAD.",
+    )
+    parser.add_argument(
+        "--no-commit-messages",
+        action="store_true",
+        help="Skip commit message scanning.",
+    )
+    parser.add_argument(
+        "--require-commit-range",
+        action="store_true",
+        help="Fail closed when the selected commit range cannot be scanned.",
+    )
     parser.add_argument(
         "--patterns-file",
         action="append",
         default=[],
         help="File containing newline-separated forbidden literals, or regex:... rules.",
     )
+    parser.add_argument(
+        "--require-rules",
+        action="store_true",
+        help="Fail closed when no forbidden patterns are loaded.",
+    )
     args = parser.parse_args(argv)
 
+    environ = os.environ if env is None else env
     root = Path(args.root).resolve()
     pattern_files = [
         root / ".public-hygiene" / "forbidden-patterns.txt",
@@ -113,9 +177,19 @@ def main(argv=None):
     ]
     pattern_files.extend(Path(path) for path in args.patterns_file)
 
-    rules = load_rules(pattern_files, env_value=os.environ.get("PUBLIC_HYGIENE_FORBIDDEN_PATTERNS", ""))
+    rules = load_rules(pattern_files, env_value=environ.get("PUBLIC_HYGIENE_FORBIDDEN_PATTERNS", ""))
+    if args.require_rules and not rules:
+        print("Public hygiene scan failed: no forbidden patterns were loaded.", file=sys.stderr)
+        return 2
+
     paths = [Path(path) for path in args.paths] if args.paths else _git_tracked_files(root)
     findings = scan_paths(root, paths, rules)
+    if not args.no_commit_messages:
+        try:
+            findings.extend(scan_commit_messages(root, args.commit_range, rules, args.require_commit_range))
+        except CommitMessageScanError:
+            print("Public hygiene scan failed: commit messages could not be scanned.", file=sys.stderr)
+            return 2
 
     if findings:
         print("Public hygiene scan failed: private reference traces were found.", file=sys.stderr)
@@ -134,9 +208,9 @@ def _rules_from_lines(lines, source):
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("regex:"):
-            rules.append(Rule(source=source, pattern=stripped.removeprefix("regex:"), regex=True))
+            rules.append(Rule(source=source, pattern=stripped.removeprefix("regex:"), index=len(rules) + 1, regex=True))
         else:
-            rules.append(Rule(source=source, pattern=stripped, regex=False))
+            rules.append(Rule(source=source, pattern=stripped, index=len(rules) + 1, regex=False))
     return rules
 
 

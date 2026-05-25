@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -65,3 +66,83 @@ class PublicHygieneScannerTest(unittest.TestCase):
                 )
 
         self.assertEqual(exit_code, 1)
+
+    def test_failure_output_redacts_forbidden_pattern_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "README.md"
+            secret = "SpecificPrivateSourceName"
+            doc.write_text(f"this names {secret}\n", encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(
+                    ["--root", os.fspath(root), os.fspath(doc)],
+                    env={"PUBLIC_HYGIENE_FORBIDDEN_PATTERNS": secret},
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertNotIn(secret, stderr.getvalue())
+        self.assertIn("env rule #1", stderr.getvalue())
+
+    def test_commit_messages_are_scanned_without_echoing_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(root, "init")
+            _run_git(root, "config", "user.email", "agent@example.com")
+            _run_git(root, "config", "user.name", "Agent")
+            (root / "README.md").write_text("clean tracked file\n", encoding="utf-8")
+            _run_git(root, "add", "README.md")
+            secret = "CommitOnlyPrivateSourceName"
+            _run_git(root, "commit", "-m", f"mention {secret}")
+
+            stderr = StringIO()
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(
+                    ["--root", os.fspath(root), "--commit-range", "HEAD"],
+                    env={"PUBLIC_HYGIENE_FORBIDDEN_PATTERNS": secret},
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertNotIn(secret, stderr.getvalue())
+        self.assertIn("commit", stderr.getvalue())
+
+    def test_require_rules_fails_closed_when_no_rules_are_loaded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "README.md"
+            doc.write_text("clean\n", encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(["--root", os.fspath(root), "--require-rules", os.fspath(doc)])
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("no forbidden patterns were loaded", stderr.getvalue())
+
+    def test_require_commit_range_fails_closed_when_commit_scan_cannot_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "README.md"
+            doc.write_text("clean\n", encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                exit_code = public_hygiene.main(
+                    [
+                        "--root",
+                        os.fspath(root),
+                        "--commit-range",
+                        "HEAD",
+                        "--require-commit-range",
+                        os.fspath(doc),
+                    ],
+                    env={"PUBLIC_HYGIENE_FORBIDDEN_PATTERNS": "NoMatchPrivateName"},
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("commit messages could not be scanned", stderr.getvalue())
+
+
+def _run_git(root, *args):
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)

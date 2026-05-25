@@ -16,6 +16,10 @@ created: 2026-05-25
 - 真实私有来源 denylist 不进入公开仓库。
 - GitHub Actions 可以在 push 和 pull request 上运行公开扫描门禁。
 - 本地和 CI 可以通过 secret/env 注入私有来源模式。
+- 扫描器失败输出不会打印 forbidden pattern 原文。
+- 扫描器覆盖 commit message，不只覆盖 tracked files。
+- CI 在没有有效规则时 fail closed。
+- CI 在 commit range 无法扫描时 fail closed。
 
 ## Commands
 
@@ -23,6 +27,8 @@ created: 2026-05-25
 python -m unittest tests.test_public_hygiene
 python scripts/public_hygiene.py --root .
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<secret pattern not committed to this repository>'; python scripts/public_hygiene.py --root .
+$env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<commit subject pattern not committed to this repository>'; python scripts/public_hygiene.py --root . --commit-range HEAD
+$env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<secret pattern not committed to this repository>'; python scripts/public_hygiene.py --root . --require-rules --require-commit-range --commit-range origin/main..HEAD
 python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
 ```
 
@@ -45,6 +51,15 @@ Verification results:
 - Public scan passed on 17 tracked files with 0 committed public denylist rules.
 - Public scan passed on 17 tracked files with 1 env-injected rule whose value was not committed to this repository.
 - Harness knowledge check passed after adding this Evidence record.
+
+Patch verification after code review:
+
+- Unit tests passed: 7 tests.
+- Failure output redacts rule values and reports redacted rule ids.
+- Commit-message scanning detects an injected pattern in `HEAD` without printing the pattern value.
+- `--require-rules` returns failure when no forbidden patterns are loaded.
+- `--require-commit-range` returns failure when commit messages cannot be scanned.
+- GitHub Actions uses full history and runs `--require-rules` plus `--require-commit-range` with an explicit push or pull request commit range.
 
 ## Boundary
 
