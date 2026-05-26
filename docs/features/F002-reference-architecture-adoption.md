@@ -22,12 +22,13 @@ updated: 2026-05-26
 
 ## Current Status
 
-In Progress。Phase 1 架构映射已形成 legacy spec 和 evidence；canonical Feature 现在作为恢复入口和验收索引。
+In Progress。Phase 1 架构映射已形成 legacy spec 和 evidence；architecture skeleton 已有 rebaseline plan，可作为下一轮 implementation 入口。
 
 ## Links
 
 - Legacy spec: [2026-05-24 reference architecture adoption design](../superpowers/specs/2026-05-24-reference-architecture-adoption-design.md)
 - Legacy spec: [2026-05-25 architecture mapping design](../superpowers/specs/2026-05-25-architecture-mapping-design.md)
+- Rebaseline plan: [2026-05-26 architecture skeleton rebaseline](../superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md)
 - Related Feature: [F001 equal-room host core](F001-equal-room-host-core.md)
 - ADR: [ADR-001 reference architecture adoption boundary](../decisions/ADR-001-reference-architecture-adoption-boundary.md)
 - Evidence: [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md)
@@ -55,7 +56,8 @@ None yet
 - [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md) 支持“参考能力确实存在并可借鉴”的前提。
 - [EV-002 architecture mapping](../evidence/EV-002-architecture-mapping.md) 支持 Phase 1 映射文档已通过本地验证。
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 支持 canonical Harness 入口已建立。
+- [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 支持后续实现计划已按 F001/F002/ADR-001 重基线。
 
 ## Next Step
 
-修订或替代 `docs/superpowers/plans/2026-05-01-architecture-skeleton-v1.md`，让下一轮实现以 project-native Shared Protocol 和 mock main path 为第一能力增量。
+执行 `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md`，让下一轮实现以 project-native Shared Protocol 和 mock main path 为第一能力增量。

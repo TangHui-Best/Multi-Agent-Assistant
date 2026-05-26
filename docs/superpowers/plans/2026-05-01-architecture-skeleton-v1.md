@@ -1,5 +1,8 @@
 # Architecture Skeleton v1 Implementation Plan
 
+> Execution status: superseded for implementation by `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md`.
+> Keep this file as legacy planning history. New Phase 1 implementation work should use the 2026-05-26 rebaseline plan because it is aligned with F001, F002, ADR-001, and the canonical Harness artifact set.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first non-bypass architecture skeleton for the Multi-Codex Equal-Room Host: Web Console -> Host API -> Room Hub -> SQLite -> Redis Event Bus / Queue -> mock Agent Runtime -> Redis Event Bus -> WebSocket -> Web Console.

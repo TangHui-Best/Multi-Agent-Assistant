@@ -30,6 +30,7 @@ In Progress。当前 canonical Feature 负责承载总体 Vision Anchor；存量
 - Legacy plan: [2026-04-05 multi-codex room v1 plan](../superpowers/plans/2026-04-05-multi-codex-room-v1.md)
 - Legacy spec: [2026-05-01 multi-codex equal-room host design](../superpowers/specs/2026-05-01-multi-codex-equal-room-host-design.md)
 - Legacy plan: [2026-05-01 architecture skeleton v1 plan](../superpowers/plans/2026-05-01-architecture-skeleton-v1.md)
+- Rebaseline plan: [2026-05-26 architecture skeleton rebaseline](../superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md)
 - Legacy spec: [2026-05-24 independent multi-codex room design](../superpowers/specs/2026-05-24-independent-multi-codex-room-design.md)
 - Related Feature: [F002 reference architecture adoption](F002-reference-architecture-adoption.md)
 - Evidence: [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md)
@@ -56,7 +57,8 @@ None yet
 
 - [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md) 记录了本地参考运行时对多 Codex-bound agent、mention routing、invocation lifecycle、session continuity 的验证。
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 记录本次 Harness canonical artifact 迁移和 strict validator 结果。
+- [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 记录 Phase 1 skeleton 计划已按 canonical Feature/ADR 重新基线化。
 
 ## Next Step
 
-先把旧 `docs/superpowers/plans/2026-05-01-architecture-skeleton-v1.md` 按 F002 的架构映射重新拆成可验证能力增量，再进入大规模业务实现。
+按 `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md` 执行 Phase 1 skeleton，先落 project-native Shared Protocol 和 mock main path，再进入 Codex Adapter。
