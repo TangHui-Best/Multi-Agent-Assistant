@@ -1,11 +1,3 @@
----
-id: EV-2026-05-25-architecture-mapping
-doc_kind: evidence
-scope: project
-feature_refs: []
-created: 2026-05-25
----
-
 # EV-2026-05-25: Phase 1 Architecture Mapping
 
 ## Scope

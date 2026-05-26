@@ -1,14 +1,3 @@
----
-doc_kind: spec
-status: active
-created: 2026-05-25
-feature_refs: []
-updates:
-  - doc: docs/superpowers/specs/2026-05-24-reference-architecture-adoption-design.md
-    section: Migration And Adoption Order
-    reason: Expands the Phase 1 architecture mapping step into a public, source-neutral design.
----
-
 # Phase 1 Architecture Mapping Design
 
 ## Summary

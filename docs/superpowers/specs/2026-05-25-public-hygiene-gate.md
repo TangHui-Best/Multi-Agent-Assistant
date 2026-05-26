@@ -1,10 +1,3 @@
----
-doc_kind: spec
-status: active
-created: 2026-05-25
-feature_refs: []
----
-
 # Public Hygiene Gate
 
 ## Goal

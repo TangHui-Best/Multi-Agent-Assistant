@@ -1,13 +1,3 @@
----
-doc_kind: spec
-status: active
-created: 2026-05-24
-updates:
-  - doc: docs/superpowers/specs/2026-05-24-independent-multi-codex-room-design.md
-    section: Development Strategy
-    reason: Revises the strategy from independent reimplementation first to reference-architecture adoption first while preserving independent product identity.
----
-
 # Reference Architecture Adoption And Collaboration Workroom Design
 
 ## Summary
