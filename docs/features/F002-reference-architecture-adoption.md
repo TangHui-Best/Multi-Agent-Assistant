@@ -57,6 +57,7 @@ None yet
 - [EV-002 architecture mapping](../evidence/EV-002-architecture-mapping.md) 支持 Phase 1 映射文档已通过本地验证。
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 支持 canonical Harness 入口已建立。
 - [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 支持后续实现计划已按 F001/F002/ADR-001 重基线。
+- [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) supports the adoption order by proving Shared Protocol, Persistence, Event Bus, Room Hub, mock Agent Runtime, Host API/WebSocket, and Web Console before Codex Adapter work.
 
 ## Next Step
 

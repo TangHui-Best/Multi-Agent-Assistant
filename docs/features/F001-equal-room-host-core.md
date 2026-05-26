@@ -58,6 +58,7 @@ None yet
 - [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md) 记录了本地参考运行时对多 Codex-bound agent、mention routing、invocation lifecycle、session continuity 的验证。
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 记录本次 Harness canonical artifact 迁移和 strict validator 结果。
 - [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 记录 Phase 1 skeleton 计划已按 canonical Feature/ADR 重新基线化。
+- [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) records the local Phase 1 skeleton runtime path through Web Console, Host API, Room Hub, SQLite, Redis, mock Agent Runtime, WebSocket, and back to Web Console.
 
 ## Next Step
 

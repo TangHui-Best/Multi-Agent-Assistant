@@ -1,0 +1,21 @@
+{
+  "name": "@multi-agent-assi/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.2.0",
+    "@multi-agent-assi/agent-runtime": "workspace:*",
+    "@multi-agent-assi/event-bus": "workspace:*",
+    "@multi-agent-assi/persistence": "workspace:*",
+    "@multi-agent-assi/room-hub": "workspace:*",
+    "@multi-agent-assi/shared": "workspace:*",
+    "fastify": "^5.6.2"
+  }
+}

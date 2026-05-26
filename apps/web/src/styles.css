@@ -1,0 +1,236 @@
+:root {
+  color: oklch(23% 0.012 255);
+  background: oklch(97% 0.006 255);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.room-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  min-height: 100vh;
+  background: oklch(97% 0.006 255);
+}
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 28px 20px;
+  border-right: 1px solid oklch(86% 0.01 255);
+  background: oklch(94% 0.008 255);
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: oklch(47% 0.025 255);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h1 {
+  font-size: 1.3rem;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+.seat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid oklch(84% 0.012 255);
+  border-radius: 8px;
+  background: oklch(98% 0.005 255);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.seat:hover,
+.seat:focus-visible,
+.seat.selected {
+  border-color: oklch(55% 0.12 250);
+  outline: none;
+}
+
+.seat small {
+  color: oklch(48% 0.02 255);
+}
+
+.thread {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-width: 0;
+}
+
+.thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 28px;
+  border-bottom: 1px solid oklch(88% 0.008 255);
+}
+
+.status {
+  min-width: 96px;
+  padding: 5px 9px;
+  border: 1px solid oklch(82% 0.012 255);
+  border-radius: 999px;
+  color: oklch(36% 0.025 255);
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 24px 28px;
+  overflow: auto;
+}
+
+.empty-state {
+  max-width: 46ch;
+  padding: 18px;
+  border: 1px solid oklch(86% 0.012 255);
+  border-radius: 8px;
+  background: oklch(99% 0.004 255);
+  color: oklch(43% 0.02 255);
+}
+
+.message {
+  max-width: 72ch;
+  padding: 12px 14px;
+  border: 1px solid oklch(86% 0.012 255);
+  border-radius: 8px;
+  background: oklch(99% 0.004 255);
+}
+
+.message.agent {
+  background: oklch(96% 0.025 160);
+  border-color: oklch(81% 0.045 160);
+}
+
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: oklch(42% 0.025 255);
+  font-size: 0.84rem;
+}
+
+.message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: grid;
+  gap: 8px;
+  padding: 18px 28px 24px;
+  border-top: 1px solid oklch(88% 0.008 255);
+  background: oklch(96% 0.006 255);
+}
+
+.composer label {
+  color: oklch(36% 0.025 255);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 10px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid oklch(78% 0.016 255);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: inherit;
+  background: oklch(99% 0.004 255);
+}
+
+textarea:focus {
+  border-color: oklch(55% 0.12 250);
+  outline: 2px solid oklch(80% 0.08 250);
+}
+
+.composer button {
+  align-self: stretch;
+  border: 1px solid oklch(48% 0.13 250);
+  border-radius: 8px;
+  background: oklch(55% 0.13 250);
+  color: oklch(98% 0.006 255);
+  cursor: pointer;
+}
+
+.composer button:hover,
+.composer button:focus-visible {
+  background: oklch(49% 0.13 250);
+  outline: none;
+}
+
+@media (max-width: 760px) {
+  .room-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .roster {
+    border-right: 0;
+    border-bottom: 1px solid oklch(86% 0.01 255);
+  }
+
+  .seat-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .composer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .composer button {
+    min-height: 44px;
+  }
+}
