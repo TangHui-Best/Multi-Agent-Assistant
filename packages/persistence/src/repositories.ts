@@ -3,12 +3,64 @@ import type { AgentSeat, InvocationRecord, MessageRecord } from '@multi-agent-as
 
 export interface PersistenceRepositories {
   ensureDefaultState(): void;
-  appendMessage(message: MessageRecord): void;
+  appendMessage(message: MessageRecord, options?: { idempotencyKey?: string }): void;
+  findMessageByIdempotencyKey(roomId: string, threadId: string, idempotencyKey: string): MessageRecord | null;
   listMessages(threadId: string): MessageRecord[];
   createInvocation(invocation: InvocationRecord): void;
+  listInvocationsBySourceMessage(sourceMessageId: string): InvocationRecord[];
   updateInvocationStatus(id: string, status: InvocationRecord['status'], error?: string): void;
   getInvocation(id: string): InvocationRecord | null;
   listAgents(): AgentSeat[];
+}
+
+type MessageRow = {
+  id: string;
+  room_id: string;
+  thread_id: string;
+  kind: MessageRecord['kind'];
+  sender_json: string;
+  body: string;
+  invocation_id: string | null;
+  created_at: number;
+};
+
+type InvocationRow = {
+  id: string;
+  room_id: string;
+  thread_id: string;
+  source_message_id: string;
+  agent_id: string;
+  status: InvocationRecord['status'];
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+function toMessageRecord(row: MessageRow): MessageRecord {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    threadId: row.thread_id,
+    kind: row.kind,
+    sender: JSON.parse(row.sender_json) as MessageRecord['sender'],
+    body: row.body,
+    ...(row.invocation_id ? { invocationId: row.invocation_id } : {}),
+    createdAt: row.created_at,
+  };
+}
+
+function toInvocationRecord(row: InvocationRow): InvocationRecord {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    threadId: row.thread_id,
+    sourceMessageId: row.source_message_id,
+    agentId: row.agent_id,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.error ? { error: row.error } : {}),
+  };
 }
 
 export function createRepositories(db: Database.Database): PersistenceRepositories {
@@ -23,10 +75,10 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
       insertAgent.run('implementer', 'Implementer', 'implementer', JSON.stringify({ kind: 'mock', profile: 'implementer' }));
     },
 
-    appendMessage(message) {
+    appendMessage(message, options) {
       db.prepare(`
-        insert into messages (id, room_id, thread_id, kind, sender_json, body, invocation_id, created_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?)
+        insert into messages (id, room_id, thread_id, kind, sender_json, body, invocation_id, idempotency_key, created_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         message.id,
         message.roomId,
@@ -35,33 +87,23 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
         JSON.stringify(message.sender),
         message.body,
         message.invocationId ?? null,
+        options?.idempotencyKey ?? null,
         message.createdAt,
       );
     },
 
+    findMessageByIdempotencyKey(roomId, threadId, idempotencyKey) {
+      const row = db
+        .prepare('select * from messages where room_id = ? and thread_id = ? and idempotency_key = ?')
+        .get(roomId, threadId, idempotencyKey) as MessageRow | undefined;
+      return row ? toMessageRecord(row) : null;
+    },
+
     listMessages(threadId) {
-      return db.prepare('select * from messages where thread_id = ? order by created_at asc, rowid asc').all(threadId).map((row) => {
-        const r = row as {
-          id: string;
-          room_id: string;
-          thread_id: string;
-          kind: MessageRecord['kind'];
-          sender_json: string;
-          body: string;
-          invocation_id: string | null;
-          created_at: number;
-        };
-        return {
-          id: r.id,
-          roomId: r.room_id,
-          threadId: r.thread_id,
-          kind: r.kind,
-          sender: JSON.parse(r.sender_json) as MessageRecord['sender'],
-          body: r.body,
-          ...(r.invocation_id ? { invocationId: r.invocation_id } : {}),
-          createdAt: r.created_at,
-        };
-      });
+      return db
+        .prepare('select * from messages where thread_id = ? order by created_at asc, rowid asc')
+        .all(threadId)
+        .map((row) => toMessageRecord(row as MessageRow));
     },
 
     createInvocation(invocation) {
@@ -81,6 +123,13 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
       );
     },
 
+    listInvocationsBySourceMessage(sourceMessageId) {
+      return db
+        .prepare('select * from invocations where source_message_id = ? order by created_at asc, rowid asc')
+        .all(sourceMessageId)
+        .map((row) => toInvocationRecord(row as InvocationRow));
+    },
+
     updateInvocationStatus(id, status, error) {
       const result = db.prepare('update invocations set status = ?, error = ?, updated_at = ? where id = ?').run(status, error ?? null, Date.now(), id);
       if (result.changes === 0) {
@@ -89,31 +138,9 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
     },
 
     getInvocation(id) {
-      const row = db.prepare('select * from invocations where id = ?').get(id) as
-        | {
-            id: string;
-            room_id: string;
-            thread_id: string;
-            source_message_id: string;
-            agent_id: string;
-            status: InvocationRecord['status'];
-            error: string | null;
-            created_at: number;
-            updated_at: number;
-          }
-        | undefined;
+      const row = db.prepare('select * from invocations where id = ?').get(id) as InvocationRow | undefined;
       if (!row) return null;
-      return {
-        id: row.id,
-        roomId: row.room_id,
-        threadId: row.thread_id,
-        sourceMessageId: row.source_message_id,
-        agentId: row.agent_id,
-        status: row.status,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        ...(row.error ? { error: row.error } : {}),
-      };
+      return toInvocationRecord(row);
     },
 
     listAgents() {

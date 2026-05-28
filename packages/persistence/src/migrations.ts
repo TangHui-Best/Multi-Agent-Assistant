@@ -32,6 +32,7 @@ export function runMigrations(db: Database.Database): void {
       sender_json text not null,
       body text not null,
       invocation_id text,
+      idempotency_key text,
       created_at integer not null,
       unique (room_id, thread_id, id),
       foreign key (room_id, thread_id) references threads(room_id, id),
@@ -53,5 +54,20 @@ export function runMigrations(db: Database.Database): void {
       foreign key (room_id, thread_id, source_message_id) references messages(room_id, thread_id, id),
       foreign key (agent_id) references agents(id)
     );
+
+    create unique index if not exists idx_messages_idempotency
+      on messages(room_id, thread_id, idempotency_key)
+      where idempotency_key is not null;
+  `);
+
+  const messageColumns = db.prepare('pragma table_info(messages)').all() as Array<{ name: string }>;
+  if (!messageColumns.some((column) => column.name === 'idempotency_key')) {
+    db.prepare('alter table messages add column idempotency_key text').run();
+  }
+
+  db.exec(`
+    create unique index if not exists idx_messages_idempotency
+      on messages(room_id, thread_id, idempotency_key)
+      where idempotency_key is not null;
   `);
 }

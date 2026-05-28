@@ -7,7 +7,7 @@ const CONSUMER_GROUP = 'mock-agent-workers';
 
 export interface MockAgentWorker {
   start(): void;
-  stop(): void;
+  stop(): Promise<void>;
 }
 
 function getErrorMessage(err: unknown): string {
@@ -103,11 +103,14 @@ export function createMockAgentWorker(deps: {
 }): MockAgentWorker {
   let stopped = true;
   let timer: NodeJS.Timeout | null = null;
+  let activeTick: Promise<void> | null = null;
   const consumerName = `worker-${process.pid}`;
 
   function scheduleNextTick(): void {
     if (stopped) return;
-    timer = setTimeout(() => void tick(), deps.pollIntervalMs ?? 250);
+    timer = setTimeout(() => {
+      activeTick = tick();
+    }, deps.pollIntervalMs ?? 250);
   }
 
   async function tick(): Promise<void> {
@@ -130,14 +133,15 @@ export function createMockAgentWorker(deps: {
     start() {
       if (!stopped) return;
       stopped = false;
-      void tick();
+      activeTick = tick();
     },
-    stop() {
+    async stop() {
       stopped = true;
       if (timer) {
         clearTimeout(timer);
         timer = null;
       }
+      await activeTick;
     },
   };
 }

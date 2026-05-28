@@ -21,11 +21,13 @@ const server = await createServer({ repositories, eventBus, roomHub });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    worker.stop();
-    void server.close().finally(() => {
-      void eventBus.close();
-      process.exit(0);
-    });
+    void worker
+      .stop()
+      .then(() => server.close())
+      .finally(() => {
+        void eventBus.close();
+        process.exit(0);
+      });
   });
 }
 

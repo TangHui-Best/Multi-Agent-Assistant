@@ -164,3 +164,30 @@ test('stop after read returns prevents beginning job processing or acking', asyn
   expect(harness.events).toEqual([]);
   expect(harness.acknowledgements).toEqual([]);
 });
+
+test('stop waits for an active read before resolving', async () => {
+  let releaseRead: (() => void) | undefined;
+  const harness = createHarness({
+    onReadAgentJobs: () => undefined,
+  });
+  vi.mocked(harness.eventBus.readAgentJobs).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        releaseRead = () => resolve([]);
+      }),
+  );
+
+  harness.worker.start();
+  await vi.waitFor(() => expect(harness.eventBus.readAgentJobs).toHaveBeenCalledTimes(1));
+
+  let stopResolved = false;
+  const stopPromise = harness.worker.stop().then(() => {
+    stopResolved = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(stopResolved).toBe(false);
+  releaseRead?.();
+  await stopPromise;
+  expect(stopResolved).toBe(true);
+});

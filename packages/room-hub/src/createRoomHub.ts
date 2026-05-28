@@ -52,10 +52,50 @@ function markInvocationsFailed(
   }
 }
 
+async function publishInvocationFailed(
+  deps: { repositories: PersistenceRepositories; eventBus: EventBus },
+  invocation: InvocationRecord,
+  error: string,
+): Promise<void> {
+  deps.repositories.updateInvocationStatus(invocation.id, 'failed', error);
+  try {
+    await deps.eventBus.publishRoomEvent({
+      type: 'invocation.failed',
+      roomId: invocation.roomId,
+      threadId: invocation.threadId,
+      invocationId: invocation.id,
+      agentId: invocation.agentId,
+      error,
+      occurredAt: Date.now(),
+    });
+  } catch {
+    // The durable failed status is the source of truth; event replay can be recovered from persistence later.
+  }
+}
+
+async function failInvocationsFrom(
+  deps: { repositories: PersistenceRepositories; eventBus: EventBus },
+  invocations: InvocationRecord[],
+  startIndex: number,
+  error: string,
+): Promise<void> {
+  for (const invocation of invocations.slice(startIndex)) {
+    await publishInvocationFailed(deps, invocation, error);
+  }
+}
+
 export function createRoomHub(deps: { repositories: PersistenceRepositories; eventBus: EventBus }): RoomHub {
   return {
     async submitMessage(input) {
       const now = Date.now();
+      const existingMessage = deps.repositories.findMessageByIdempotencyKey(input.roomId, input.threadId, input.idempotencyKey);
+      if (existingMessage) {
+        return {
+          message: existingMessage,
+          invocations: deps.repositories.listInvocationsBySourceMessage(existingMessage.id),
+        };
+      }
+
       const knownAgentIds = new Set(deps.repositories.listAgents().map((agent) => agent.id));
       const targetAgentIds = resolveTargets(input, knownAgentIds);
       const message: MessageRecord = {
@@ -67,7 +107,7 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         body: input.body,
         createdAt: now,
       };
-      deps.repositories.appendMessage(message);
+      deps.repositories.appendMessage(message, { idempotencyKey: input.idempotencyKey });
 
       const invocations: InvocationRecord[] = [];
       for (const agentId of targetAgentIds) {
@@ -94,7 +134,7 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
           occurredAt: now,
         });
       } catch (err) {
-        markInvocationsFailed(deps.repositories, invocations, 0, getErrorMessage(err));
+        await failInvocationsFrom(deps, invocations, 0, getErrorMessage(err));
         throw err;
       }
 
@@ -108,12 +148,6 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
           prompt: input.body,
         };
         try {
-          await deps.eventBus.enqueueAgentJob(job);
-        } catch (err) {
-          markInvocationsFailed(deps.repositories, invocations, index, getErrorMessage(err));
-          throw err;
-        }
-        try {
           await deps.eventBus.publishRoomEvent({
             type: 'invocation.queued',
             roomId: input.roomId,
@@ -122,7 +156,13 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
             occurredAt: Date.now(),
           });
         } catch (err) {
-          markInvocationsFailed(deps.repositories, invocations, index + 1, getErrorMessage(err));
+          await failInvocationsFrom(deps, invocations, index, getErrorMessage(err));
+          throw err;
+        }
+        try {
+          await deps.eventBus.enqueueAgentJob(job);
+        } catch (err) {
+          await failInvocationsFrom(deps, invocations, index, getErrorMessage(err));
           throw err;
         }
       }

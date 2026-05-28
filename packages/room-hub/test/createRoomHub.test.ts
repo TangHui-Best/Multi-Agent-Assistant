@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { EventBus } from '@multi-agent-assi/event-bus';
-import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
+import { createDatabase, createRepositories, type PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent, SubmitMessageInput } from '@multi-agent-assi/shared';
 import { createRoomHub } from '../src/createRoomHub.js';
 
@@ -31,15 +31,20 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
   const jobs: AgentJob[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
+  const actions: string[] = [];
   const repositories: PersistenceRepositories = {
     ensureDefaultState: vi.fn(),
     appendMessage: vi.fn((message: MessageRecord) => {
       messages.push(message);
     }),
+    findMessageByIdempotencyKey: vi.fn(() => null),
     listMessages: vi.fn((threadId: string) => messages.filter((message) => message.threadId === threadId)),
     createInvocation: vi.fn((invocation: InvocationRecord) => {
       invocations.push(invocation);
     }),
+    listInvocationsBySourceMessage: vi.fn((sourceMessageId: string) =>
+      invocations.filter((invocation) => invocation.sourceMessageId === sourceMessageId),
+    ),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
@@ -48,9 +53,11 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
   };
   const eventBus: EventBus = {
     publishRoomEvent: vi.fn(async (event: RoomEvent) => {
+      actions.push(`event:${event.type}:${event.type === 'invocation.queued' ? event.invocation.agentId : ''}`);
       events.push(event);
     }),
     enqueueAgentJob: vi.fn(async (job: AgentJob) => {
+      actions.push(`job:${job.agentId}`);
       jobs.push(job);
     }),
     readAgentJobs: vi.fn(async () => []),
@@ -66,6 +73,7 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     invocations,
     repositories,
     events,
+    actions,
     statusUpdates,
     roomHub: createRoomHub({ repositories, eventBus }),
   };
@@ -98,13 +106,14 @@ test('duplicate mention ids are deduped while preserving target order', async ()
 });
 
 test('enqueue failure marks invocation failed before rethrowing', async () => {
-  const { eventBus, invocations, repositories, roomHub, statusUpdates } = createHarness(['architect']);
+  const { eventBus, events, invocations, repositories, roomHub, statusUpdates } = createHarness(['architect']);
   vi.mocked(eventBus.enqueueAgentJob).mockRejectedValueOnce(new Error('redis down'));
 
   await expect(roomHub.submitMessage(createInput({ mode: 'mention', agentIds: ['architect'] }))).rejects.toThrow('redis down');
 
   expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(invocations[0]?.id, 'failed', 'redis down');
   expect(statusUpdates).toEqual([{ id: invocations[0]?.id, status: 'failed', error: 'redis down' }]);
+  expect(events.map((event) => event.type)).toContain('invocation.failed');
 });
 
 test('multi-target enqueue failure marks the failed and later not-yet-enqueued invocations failed', async () => {
@@ -139,7 +148,7 @@ test('message.created publish failure marks all invocations failed and enqueues 
   ]);
 });
 
-test('invocation.queued publish failure keeps the enqueued invocation queued and fails later invocations', async () => {
+test('invocation.queued publish failure prevents the job from becoming consumable and fails all pending invocations', async () => {
   const { eventBus, invocations, jobs, roomHub, statusUpdates } = createHarness(['architect', 'reviewer', 'implementer']);
   vi.mocked(eventBus.publishRoomEvent)
     .mockResolvedValueOnce()
@@ -147,20 +156,59 @@ test('invocation.queued publish failure keeps the enqueued invocation queued and
 
   await expect(roomHub.submitMessage(createInput({ mode: 'broadcast' }))).rejects.toThrow('queue event publish failed');
 
-  expect(jobs.map((job) => job.agentId)).toEqual(['architect']);
+  expect(jobs).toEqual([]);
   expect(statusUpdates).toEqual([
+    { id: invocations[0]?.id, status: 'failed', error: 'queue event publish failed' },
     { id: invocations[1]?.id, status: 'failed', error: 'queue event publish failed' },
     { id: invocations[2]?.id, status: 'failed', error: 'queue event publish failed' },
   ]);
-  expect(statusUpdates.some((update) => update.id === invocations[0]?.id)).toBe(false);
 });
 
 test('successful broadcast queues three known agents', async () => {
-  const { events, jobs, roomHub } = createHarness(['reviewer', 'architect', 'implementer', 'observer']);
+  const { actions, events, jobs, roomHub } = createHarness(['reviewer', 'architect', 'implementer', 'observer']);
 
   const result = await roomHub.submitMessage(createInput({ mode: 'broadcast' }));
 
   expect(result.invocations.map((invocation) => invocation.agentId)).toEqual(['architect', 'reviewer', 'implementer']);
   expect(jobs.map((job) => job.agentId)).toEqual(['architect', 'reviewer', 'implementer']);
   expect(events.map((event) => event.type)).toEqual(['message.created', 'invocation.queued', 'invocation.queued', 'invocation.queued']);
+  expect(actions).toEqual([
+    'event:message.created:',
+    'event:invocation.queued:architect',
+    'job:architect',
+    'event:invocation.queued:reviewer',
+    'job:reviewer',
+    'event:invocation.queued:implementer',
+    'job:implementer',
+  ]);
+});
+
+test('same idempotency key returns the original message and invocations without duplicate jobs', async () => {
+  const repositories = createRepositories(createDatabase(':memory:'));
+  repositories.ensureDefaultState();
+  const eventBus: EventBus & { jobs: AgentJob[] } = {
+    jobs: [],
+    publishRoomEvent: vi.fn(async () => {}),
+    enqueueAgentJob: vi.fn(async (job: AgentJob) => {
+      eventBus.jobs.push(job);
+    }),
+    readAgentJobs: vi.fn(async () => []),
+    ackAgentJob: vi.fn(async () => {}),
+    subscribeRoomEvents: vi.fn(async () => async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const roomHub = createRoomHub({ repositories, eventBus });
+  const input: SubmitMessageInput = {
+    ...createInput({ mode: 'mention', agentIds: ['architect'] }),
+    roomId: 'default-room',
+    threadId: 'default-thread',
+  };
+
+  const first = await roomHub.submitMessage(input);
+  const second = await roomHub.submitMessage(input);
+
+  expect(second.message.id).toBe(first.message.id);
+  expect(second.invocations.map((invocation) => invocation.id)).toEqual(first.invocations.map((invocation) => invocation.id));
+  expect(repositories.listMessages('default-thread')).toHaveLength(1);
+  expect(eventBus.jobs).toHaveLength(1);
 });
