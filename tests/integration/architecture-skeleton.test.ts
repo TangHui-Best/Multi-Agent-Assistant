@@ -29,7 +29,7 @@ describe('architecture skeleton', () => {
       expect(messages.some((message) => message.sender.type === 'agent' && message.sender.agentId === 'architect')).toBe(true);
     });
 
-    worker.stop();
+    await worker.stop();
     await eventBus.close();
 
     const messages = repositories.listMessages('default-thread');

@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
-import { createServer } from '../src/createServer.js';
+import { attachRoomEventSocket, createServer } from '../src/createServer.js';
 
 function createHarness() {
   const messages: MessageRecord[] = [];
@@ -13,7 +14,9 @@ function createHarness() {
     ensureDefaultState: vi.fn(),
     appendMessage: vi.fn((message: MessageRecord) => messages.push(message)),
     listMessages: vi.fn(() => messages),
+    findMessageByIdempotencyKey: vi.fn(() => null),
     createInvocation: vi.fn(),
+    listInvocationsBySourceMessage: vi.fn(() => []),
     updateInvocationStatus: vi.fn(),
     getInvocation: vi.fn(() => null),
     listAgents: vi.fn(() => agents),
@@ -90,5 +93,33 @@ describe('host server', () => {
     expect(harness.roomHub.submitMessage).toHaveBeenCalledOnce();
     expect(response.json().invocations).toHaveLength(1);
     await server.close();
+  });
+
+  it('unsubscribes if a websocket closes before the Redis subscription resolves', async () => {
+    let resolveSubscription: ((unsubscribe: () => Promise<void>) => void) | undefined;
+    const unsubscribe = vi.fn(async () => {});
+    const eventBus: EventBus = {
+      publishRoomEvent: vi.fn(async () => {}),
+      enqueueAgentJob: vi.fn(async () => {}),
+      readAgentJobs: vi.fn(async () => []),
+      ackAgentJob: vi.fn(async () => {}),
+      subscribeRoomEvents: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveSubscription = resolve;
+          }),
+      ),
+      close: vi.fn(async () => {}),
+    };
+    const socket = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      send: vi.fn(),
+    });
+
+    attachRoomEventSocket(eventBus, socket);
+    socket.readyState = 3;
+    socket.emit('close');
+    resolveSubscription?.(unsubscribe);
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
   });
 });

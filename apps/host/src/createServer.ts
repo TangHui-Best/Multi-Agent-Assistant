@@ -3,12 +3,45 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { RoomHub } from '@multi-agent-assi/room-hub';
-import { submitMessageSchema } from '@multi-agent-assi/shared';
+import { submitMessageSchema, type RoomEvent } from '@multi-agent-assi/shared';
 
 export interface CreateServerDeps {
   repositories: PersistenceRepositories;
   eventBus: EventBus;
   roomHub: RoomHub;
+}
+
+interface RoomEventSocket {
+  readyState?: number;
+  send(payload: string): void;
+  on(event: 'close', handler: () => void): void;
+}
+
+const SOCKET_OPEN = 1;
+
+export function attachRoomEventSocket(eventBus: EventBus, socket: RoomEventSocket): void {
+  let closed = false;
+  let unsubscribe: (() => Promise<void>) | undefined;
+
+  const sendEvent = (event: RoomEvent) => {
+    if (closed || (socket.readyState !== undefined && socket.readyState !== SOCKET_OPEN)) {
+      return;
+    }
+    socket.send(JSON.stringify(event));
+  };
+
+  void eventBus.subscribeRoomEvents(sendEvent).then((nextUnsubscribe) => {
+    if (closed) {
+      void nextUnsubscribe();
+      return;
+    }
+    unsubscribe = nextUnsubscribe;
+  });
+
+  socket.on('close', () => {
+    closed = true;
+    void unsubscribe?.();
+  });
 }
 
 export async function createServer(deps: CreateServerDeps): Promise<FastifyInstance> {
@@ -32,17 +65,7 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
   });
 
   server.get('/ws', { websocket: true }, (socket) => {
-    let unsubscribe: (() => Promise<void>) | undefined;
-
-    void deps.eventBus.subscribeRoomEvents((event) => {
-      socket.send(JSON.stringify(event));
-    }).then((nextUnsubscribe) => {
-      unsubscribe = nextUnsubscribe;
-    });
-
-    socket.on('close', () => {
-      void unsubscribe?.();
-    });
+    attachRoomEventSocket(deps.eventBus, socket);
   });
 
   return server;
