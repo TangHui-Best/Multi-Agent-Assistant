@@ -125,3 +125,116 @@ test('fails and acks only the current invocation when no adapter exists for the 
     }),
   ]);
 });
+
+test('serializes jobs for the same agent seat', async () => {
+  const jobs = [
+    { streamId: 'stream-1', job: createJob({ invocationId: 'invocation-1', agentId: 'architect' }) },
+    { streamId: 'stream-2', job: createJob({ invocationId: 'invocation-2', agentId: 'architect' }) },
+  ];
+  let activeForSeat = 0;
+  let maxActiveForSeat = 0;
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    async run({ job }) {
+      activeForSeat += 1;
+      maxActiveForSeat = Math.max(maxActiveForSeat, activeForSeat);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeForSeat -= 1;
+      return { body: `final ${job.invocationId}` };
+    },
+  };
+  const { acknowledgements, worker } = createHarness({ adapter, jobs });
+
+  worker.start();
+  await vi.waitFor(() =>
+    expect(acknowledgements.map((ack) => ack.streamId)).toEqual(['stream-1', 'stream-2']),
+  );
+  await worker.stop();
+
+  expect(maxActiveForSeat).toBe(1);
+});
+
+test('runs jobs for different agent seats concurrently', async () => {
+  const jobs = [
+    { streamId: 'stream-1', job: createJob({ invocationId: 'invocation-1', agentId: 'architect' }) },
+    { streamId: 'stream-2', job: createJob({ invocationId: 'invocation-2', agentId: 'reviewer' }) },
+  ];
+  const seats: AgentSeat[] = [
+    { id: 'architect', displayName: 'Architect', role: 'architect', runtime: { kind: 'codex-cli', profile: 'architect' } },
+    { id: 'reviewer', displayName: 'Reviewer', role: 'reviewer', runtime: { kind: 'codex-cli', profile: 'reviewer' } },
+  ];
+  let active = 0;
+  let maxActive = 0;
+  let release: (() => void) | undefined;
+  const bothStarted = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    async run({ job }) {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (active === 2) {
+        release?.();
+      }
+      await bothStarted;
+      active -= 1;
+      return { body: `final ${job.invocationId}` };
+    },
+  };
+  const { acknowledgements, repositories, worker } = createHarness({ adapter, jobs });
+  vi.mocked(repositories.listAgents).mockReturnValue(seats);
+
+  worker.start();
+  await vi.waitFor(() =>
+    expect(acknowledgements.map((ack) => ack.streamId).sort()).toEqual(['stream-1', 'stream-2']),
+  );
+  await worker.stop();
+
+  expect(maxActive).toBe(2);
+});
+
+test('isolates one agent failure while another agent in the same batch succeeds', async () => {
+  const jobs = [
+    { streamId: 'stream-1', job: createJob({ invocationId: 'invocation-1', agentId: 'architect' }) },
+    { streamId: 'stream-2', job: createJob({ invocationId: 'invocation-2', agentId: 'reviewer' }) },
+  ];
+  const seats: AgentSeat[] = [
+    { id: 'architect', displayName: 'Architect', role: 'architect', runtime: { kind: 'codex-cli', profile: 'architect' } },
+    { id: 'reviewer', displayName: 'Reviewer', role: 'reviewer', runtime: { kind: 'codex-cli', profile: 'reviewer' } },
+  ];
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    async run({ job }) {
+      if (job.agentId === 'architect') {
+        throw new Error('architect failed');
+      }
+      return { body: 'reviewer final' };
+    },
+  };
+  const { acknowledgements, events, messages, repositories, statusUpdates, worker } = createHarness({ adapter, jobs });
+  vi.mocked(repositories.listAgents).mockReturnValue(seats);
+
+  worker.start();
+  await vi.waitFor(() =>
+    expect(acknowledgements.map((ack) => ack.streamId).sort()).toEqual(['stream-1', 'stream-2']),
+  );
+  await worker.stop();
+
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ sender: { type: 'agent', agentId: 'reviewer' }, body: 'reviewer final' });
+  expect(statusUpdates).toEqual(
+    expect.arrayContaining([
+      { id: 'invocation-1', status: 'running', error: undefined },
+      { id: 'invocation-1', status: 'failed', error: 'architect failed' },
+      { id: 'invocation-2', status: 'running', error: undefined },
+      { id: 'invocation-2', status: 'succeeded', error: undefined },
+    ]),
+  );
+  expect(events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'invocation.failed', invocationId: 'invocation-1', error: 'architect failed' }),
+      expect.objectContaining({ type: 'invocation.completed', invocationId: 'invocation-2' }),
+    ]),
+  );
+});

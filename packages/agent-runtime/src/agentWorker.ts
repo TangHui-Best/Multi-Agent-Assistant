@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { EventBus } from '@multi-agent-assi/event-bus';
+import type { AgentJobEnvelope } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentJob, AgentSeat, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
 
@@ -153,6 +154,24 @@ export function createAgentWorker(deps: {
   const consumerName = `worker-${process.pid}`;
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.kind, adapter]));
 
+  async function processJobGroup(group: AgentJobEnvelope[]): Promise<void> {
+    for (const { streamId, job } of group) {
+      if (stopped) return;
+      await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters }, streamId, job);
+      await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+    }
+  }
+
+  async function processJobsByAgentSlot(jobs: AgentJobEnvelope[]): Promise<void> {
+    const groups = new Map<string, AgentJobEnvelope[]>();
+    for (const envelope of jobs) {
+      const group = groups.get(envelope.job.agentId) ?? [];
+      group.push(envelope);
+      groups.set(envelope.job.agentId, group);
+    }
+    await Promise.all([...groups.values()].map((group) => processJobGroup(group)));
+  }
+
   function scheduleNextTick(): void {
     if (stopped) return;
     timer = setTimeout(() => {
@@ -165,11 +184,7 @@ export function createAgentWorker(deps: {
     try {
       const jobs = await deps.eventBus.readAgentJobs(consumerGroup, consumerName, 100);
       if (stopped) return;
-      for (const { streamId, job } of jobs) {
-        if (stopped) return;
-        await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters }, streamId, job);
-        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
-      }
+      await processJobsByAgentSlot(jobs);
     } catch (err) {
       console.warn('Agent worker tick failed; polling will continue', err);
     } finally {
