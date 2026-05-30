@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
-import type { AgentSeat, InvocationRecord, MessageRecord } from '@multi-agent-assi/shared';
+import type { AgentSeat, InvocationRecord, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
 
 export interface PersistenceRepositories {
-  ensureDefaultState(): void;
+  ensureDefaultState(options?: { runtimeKind?: RuntimeKind }): void;
   appendMessage(message: MessageRecord, options?: { idempotencyKey?: string }): void;
   findMessageByIdempotencyKey(roomId: string, threadId: string, idempotencyKey: string): MessageRecord | null;
   listMessages(threadId: string): MessageRecord[];
@@ -65,14 +65,15 @@ function toInvocationRecord(row: InvocationRow): InvocationRecord {
 
 export function createRepositories(db: Database.Database): PersistenceRepositories {
   return {
-    ensureDefaultState() {
+    ensureDefaultState(options) {
       const now = Date.now();
+      const runtimeKind = options?.runtimeKind ?? 'mock';
       db.prepare('insert or ignore into rooms (id, title, created_at) values (?, ?, ?)').run('default-room', 'Default Room', now);
       db.prepare('insert or ignore into threads (id, room_id, title, created_at) values (?, ?, ?, ?)').run('default-thread', 'default-room', 'Default Thread', now);
       const insertAgent = db.prepare('insert or replace into agents (id, display_name, role, runtime_json) values (?, ?, ?, ?)');
-      insertAgent.run('architect', 'Architect', 'architect', JSON.stringify({ kind: 'mock', profile: 'architect' }));
-      insertAgent.run('reviewer', 'Reviewer', 'reviewer', JSON.stringify({ kind: 'mock', profile: 'reviewer' }));
-      insertAgent.run('implementer', 'Implementer', 'implementer', JSON.stringify({ kind: 'mock', profile: 'implementer' }));
+      insertAgent.run('architect', 'Architect', 'architect', JSON.stringify({ kind: runtimeKind, profile: 'architect' }));
+      insertAgent.run('reviewer', 'Reviewer', 'reviewer', JSON.stringify({ kind: runtimeKind, profile: 'reviewer' }));
+      insertAgent.run('implementer', 'Implementer', 'implementer', JSON.stringify({ kind: runtimeKind, profile: 'implementer' }));
     },
 
     appendMessage(message, options) {

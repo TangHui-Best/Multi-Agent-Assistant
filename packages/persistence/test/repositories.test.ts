@@ -3,6 +3,14 @@ import { createDatabase } from '../src/database.js';
 import { createRepositories } from '../src/repositories.js';
 
 describe('persistence repositories', () => {
+  it('can seed default seats with a configured runtime binding', () => {
+    const repositories = createRepositories(createDatabase(':memory:'));
+
+    repositories.ensureDefaultState({ runtimeKind: 'codex-cli' });
+
+    expect(repositories.listAgents().map((agent) => agent.runtime.kind)).toEqual(['codex-cli', 'codex-cli', 'codex-cli']);
+  });
+
   it('stores idempotency keys with durable messages and returns matching invocations', () => {
     const repositories = createRepositories(createDatabase(':memory:'));
     repositories.ensureDefaultState();

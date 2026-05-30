@@ -35,6 +35,9 @@ function createHarness(
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
   const acknowledgements: Array<{ consumerGroup: string; streamId: string }> = [];
+  const agents: AgentSeat[] = [
+    { id: 'architect', displayName: 'Architect', role: 'architect', runtime: { kind: 'mock', profile: 'architect' } },
+  ];
   const repositories: PersistenceRepositories = {
     ensureDefaultState: vi.fn(),
     appendMessage: vi.fn((message: MessageRecord) => {
@@ -46,7 +49,7 @@ function createHarness(
       statusUpdates.push({ id, status, error });
     }),
     getInvocation: vi.fn(() => null),
-    listAgents: vi.fn((): AgentSeat[] => []),
+    listAgents: vi.fn((): AgentSeat[] => agents),
   };
   const eventBus: EventBus = {
     publishRoomEvent: vi.fn(async (event: RoomEvent) => {

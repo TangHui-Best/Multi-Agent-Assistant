@@ -1,0 +1,195 @@
+import { randomUUID } from 'node:crypto';
+import type { EventBus } from '@multi-agent-assi/event-bus';
+import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
+import type { AgentJob, AgentSeat, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
+
+export interface AgentWorker {
+  start(): void;
+  stop(): Promise<void>;
+}
+
+export interface RuntimeAdapterRunContext {
+  job: AgentJob;
+  seat: AgentSeat;
+  emitDelta(delta: string): Promise<void>;
+}
+
+export interface RuntimeAdapterRunResult {
+  body: string;
+}
+
+export interface RuntimeAdapter {
+  kind: RuntimeKind;
+  run(context: RuntimeAdapterRunContext): Promise<RuntimeAdapterRunResult>;
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function markAndPublishFailure(
+  deps: { repositories: PersistenceRepositories; eventBus: EventBus },
+  job: AgentJob,
+  error: string,
+): Promise<void> {
+  try {
+    deps.repositories.updateInvocationStatus(job.invocationId, 'failed', error);
+  } catch (err) {
+    console.warn(`Unable to mark invocation failed: ${job.invocationId}`, err);
+  }
+
+  try {
+    await deps.eventBus.publishRoomEvent({
+      type: 'invocation.failed',
+      roomId: job.roomId,
+      threadId: job.threadId,
+      invocationId: job.invocationId,
+      agentId: job.agentId,
+      error,
+      occurredAt: Date.now(),
+    });
+  } catch (err) {
+    console.warn(`Unable to publish invocation failure: ${job.invocationId}`, err);
+  }
+}
+
+function findSeat(repositories: PersistenceRepositories, agentId: string): AgentSeat {
+  const seat = repositories.listAgents().find((candidate) => candidate.id === agentId);
+  if (!seat) {
+    throw new Error(`Agent seat not found: ${agentId}`);
+  }
+  return seat;
+}
+
+function findAdapter(adapters: Map<RuntimeKind, RuntimeAdapter>, kind: RuntimeKind): RuntimeAdapter {
+  const adapter = adapters.get(kind);
+  if (!adapter) {
+    throw new Error(`No runtime adapter registered for ${kind}`);
+  }
+  return adapter;
+}
+
+async function processJob(
+  deps: {
+    repositories: PersistenceRepositories;
+    eventBus: EventBus;
+    adapters: Map<RuntimeKind, RuntimeAdapter>;
+  },
+  streamId: string,
+  job: AgentJob,
+): Promise<void> {
+  let durableSuccess = false;
+  try {
+    const seat = findSeat(deps.repositories, job.agentId);
+    const adapter = findAdapter(deps.adapters, seat.runtime.kind);
+
+    deps.repositories.updateInvocationStatus(job.invocationId, 'running');
+    await deps.eventBus.publishRoomEvent({
+      type: 'invocation.running',
+      roomId: job.roomId,
+      threadId: job.threadId,
+      invocationId: job.invocationId,
+      agentId: job.agentId,
+      occurredAt: Date.now(),
+    });
+
+    const result = await adapter.run({
+      job,
+      seat,
+      emitDelta: async (delta) => {
+        await deps.eventBus.publishRoomEvent({
+          type: 'agent.delta',
+          roomId: job.roomId,
+          threadId: job.threadId,
+          invocationId: job.invocationId,
+          agentId: job.agentId,
+          delta,
+          occurredAt: Date.now(),
+        });
+      },
+    });
+
+    const message: MessageRecord = {
+      id: randomUUID(),
+      roomId: job.roomId,
+      threadId: job.threadId,
+      kind: 'agent_message',
+      sender: { type: 'agent', agentId: job.agentId },
+      body: result.body,
+      invocationId: job.invocationId,
+      createdAt: Date.now(),
+    };
+    deps.repositories.appendMessage(message);
+    deps.repositories.updateInvocationStatus(job.invocationId, 'succeeded');
+    durableSuccess = true;
+    await deps.eventBus.publishRoomEvent({
+      type: 'invocation.completed',
+      roomId: job.roomId,
+      threadId: job.threadId,
+      invocationId: job.invocationId,
+      message,
+      occurredAt: Date.now(),
+    });
+  } catch (err) {
+    if (!durableSuccess) {
+      await markAndPublishFailure(deps, job, getErrorMessage(err));
+    } else {
+      console.warn(`Agent worker completed durable output but a later event publish failed: ${streamId}`, err);
+    }
+  }
+}
+
+export function createAgentWorker(deps: {
+  repositories: PersistenceRepositories;
+  eventBus: EventBus;
+  adapters: RuntimeAdapter[];
+  consumerGroup?: string;
+  pollIntervalMs?: number;
+}): AgentWorker {
+  let stopped = true;
+  let timer: NodeJS.Timeout | null = null;
+  let activeTick: Promise<void> | null = null;
+  const consumerGroup = deps.consumerGroup ?? 'agent-runtime-workers';
+  const consumerName = `worker-${process.pid}`;
+  const adapters = new Map(deps.adapters.map((adapter) => [adapter.kind, adapter]));
+
+  function scheduleNextTick(): void {
+    if (stopped) return;
+    timer = setTimeout(() => {
+      activeTick = tick();
+    }, deps.pollIntervalMs ?? 250);
+  }
+
+  async function tick(): Promise<void> {
+    if (stopped) return;
+    try {
+      const jobs = await deps.eventBus.readAgentJobs(consumerGroup, consumerName, 100);
+      if (stopped) return;
+      for (const { streamId, job } of jobs) {
+        if (stopped) return;
+        await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters }, streamId, job);
+        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+      }
+    } catch (err) {
+      console.warn('Agent worker tick failed; polling will continue', err);
+    } finally {
+      scheduleNextTick();
+    }
+  }
+
+  return {
+    start() {
+      if (!stopped) return;
+      stopped = false;
+      activeTick = tick();
+    },
+    async stop() {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      await activeTick;
+    },
+  };
+}
