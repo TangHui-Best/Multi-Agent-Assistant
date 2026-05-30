@@ -60,6 +60,7 @@ None yet
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 记录本次 Harness canonical artifact 迁移和 strict validator 结果。
 - [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 记录 Phase 1 skeleton 计划已按 canonical Feature/ADR 重新基线化。
 - [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) records the local Phase 1 skeleton runtime path through Web Console, Host API, Room Hub, SQLite, Redis, mock Agent Runtime, WebSocket, and back to Web Console.
+- [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md) records the first real Codex Adapter Room Hub path and in-process per-agent slot control evidence.
 
 ## Next Step
 

@@ -1,4 +1,6 @@
-import { spawn as nodeSpawn, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import { spawn as nodeSpawn, type SpawnOptions } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { RuntimeAdapter } from './agentWorker.js';
 
@@ -10,7 +12,7 @@ export interface CodexProcess {
   on(event: 'error', listener: (error: Error) => void): this;
 }
 
-export type SpawnCodexProcess = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => CodexProcess;
+export type SpawnCodexProcess = (command: string, args: string[], options: SpawnOptions) => CodexProcess;
 
 export interface CodexCliAdapterOptions {
   command?: string;
@@ -22,7 +24,40 @@ export interface CodexCliAdapterOptions {
 }
 
 function defaultCodexCommand(): string {
-  return process.platform === 'win32' ? 'codex.cmd' : 'codex';
+  return defaultWindowsCodexJsPath() ? process.execPath : 'codex';
+}
+
+function defaultWindowsCodexJsPath(): string | null {
+  if (process.platform !== 'win32' || !process.env.APPDATA) return null;
+  const candidate = join(process.env.APPDATA, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+  return existsSync(candidate) ? candidate : null;
+}
+
+function defaultCodexArgs(command: string): string[] {
+  const windowsCodexJsPath = defaultWindowsCodexJsPath();
+  const baseArgs = ['-a', 'never', 'exec', '--json', '--sandbox', 'workspace-write'];
+  return windowsCodexJsPath && command === process.execPath ? [windowsCodexJsPath, ...baseArgs] : baseArgs;
+}
+
+function shouldUseShell(command: string): boolean {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+}
+
+function quoteWindowsArg(value: string): string {
+  if (/^[A-Za-z0-9._:/\\=-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function resolveSpawnInvocation(command: string, args: string[]): { command: string; args: string[] } {
+  if (!shouldUseShell(command)) {
+    return { command, args };
+  }
+  return {
+    command: process.env.ComSpec ?? 'cmd.exe',
+    args: ['/d', '/s', '/c', [command, ...args.map(quoteWindowsArg)].join(' ')],
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -66,9 +101,9 @@ function normalizeJsonLine(line: string): { delta?: string; final?: string } | n
 
 export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): RuntimeAdapter {
   const command = options.command ?? defaultCodexCommand();
-  const args = options.args ?? ['exec', '--json', '--sandbox', 'workspace-write', '--ask-for-approval', 'never'];
-  const spawn = options.spawn ?? ((cmd, cmdArgs, spawnOptions) => nodeSpawn(cmd, cmdArgs, spawnOptions));
-  const timeoutMs = options.timeoutMs ?? 120_000;
+  const args = options.args ?? defaultCodexArgs(command);
+  const spawn = options.spawn ?? ((cmd, cmdArgs, spawnOptions) => nodeSpawn(cmd, cmdArgs, spawnOptions) as CodexProcess);
+  const timeoutMs = options.timeoutMs ?? 300_000;
 
   return {
     kind: 'codex-cli',
@@ -112,9 +147,11 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
           stdoutBuffer = '';
         };
 
-        const proc = spawn(command, [...args, job.prompt], {
+        const invocation = resolveSpawnInvocation(command, [...args, job.prompt]);
+        const proc = spawn(invocation.command, invocation.args, {
           cwd: options.cwd,
           env: options.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
         });
 

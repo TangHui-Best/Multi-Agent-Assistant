@@ -44,10 +44,10 @@ Introduce a runtime adapter boundary owned by `packages/agent-runtime`:
 
 ### Codex CLI Invocation
 
-Use `codex.cmd exec` on Windows by default because direct `codex` resolves to `codex.ps1`, which may be blocked by PowerShell execution policy. The command should run non-interactively, prefer JSONL output when configured, and start with safe local defaults:
+Use the npm-installed `@openai/codex/bin/codex.js` through Node on Windows by default because direct `codex` resolves to `codex.ps1`, `codex.cmd` can split prompt arguments through its shim, and the WindowsApps `codex.exe` path may be access-restricted. The command should run non-interactively, prefer JSONL output when configured, and start with safe local defaults equivalent to:
 
 ```text
-codex.cmd exec --json --sandbox workspace-write --ask-for-approval never <prompt>
+codex.cmd -a never exec --json --sandbox workspace-write <prompt>
 ```
 
 The adapter must allow command override for tests and local configuration.
@@ -105,6 +105,6 @@ Manual Codex runtime verification is required before claiming Phase 2 complete.
 ## Open Risks
 
 - Real Codex output schema may differ across CLI versions; keep parsing tolerant and test with captured local JSONL samples.
-- Long-running Codex invocations need timeout behavior before broad multi-seat usage.
+- Windows Codex invocations can reconnect for longer than two minutes; keep adapter timeout configurable and avoid treating ordinary reconnects as immediate failure.
 - Session continuity is not complete until session ids and resume metadata are persisted; do not claim that in Phase 2 unless implemented and verified.
 - Redis-backed distributed slot control may be needed later; this slice only needs local worker correctness unless multi-process workers are introduced.

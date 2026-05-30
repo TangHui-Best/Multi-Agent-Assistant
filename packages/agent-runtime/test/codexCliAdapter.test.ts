@@ -53,9 +53,14 @@ test('spawns codex exec and normalizes JSONL deltas plus final output', async ()
   await expect(resultPromise).resolves.toEqual({ body: 'final answer' });
   expect(deltas).toEqual(['hello']);
   expect(spawn).toHaveBeenCalledWith(
-    'codex.cmd',
-    ['exec', '--json', '--sandbox', 'workspace-write', '--ask-for-approval', 'never', 'Review this plan'],
-    expect.objectContaining({ windowsHide: true }),
+    expect.stringMatching(/cmd\.exe$/i),
+    [
+      '/d',
+      '/s',
+      '/c',
+      'codex.cmd -a never exec --json --sandbox workspace-write "Review this plan"',
+    ],
+    expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }),
   );
 });
 
