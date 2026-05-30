@@ -33,6 +33,7 @@ In Progress。当前 canonical Feature 负责承载总体 Vision Anchor；存量
 - Rebaseline plan: [2026-05-26 architecture skeleton rebaseline](../superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md)
 - Legacy spec: [2026-05-24 independent multi-codex room design](../superpowers/specs/2026-05-24-independent-multi-codex-room-design.md)
 - Related Feature: [F002 reference architecture adoption](F002-reference-architecture-adoption.md)
+- Phase 2/3 plan: [2026-05-31 codex adapter and slot control](../superpowers/plans/2026-05-31-codex-adapter-slot-control.md)
 - Evidence: [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md)
 - Evidence: [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md)
 
@@ -62,4 +63,4 @@ None yet
 
 ## Next Step
 
-按 `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md` 执行 Phase 1 skeleton，先落 project-native Shared Protocol 和 mock main path，再进入 Codex Adapter。
+按 `docs/superpowers/plans/2026-05-31-codex-adapter-slot-control.md` 收口 Phase 2/3：先让真实 Codex Adapter 通过现有 Room Hub/Invocation/Event Bus/Persistence 主链路运行，再加入多席位与 per-agent slot control。

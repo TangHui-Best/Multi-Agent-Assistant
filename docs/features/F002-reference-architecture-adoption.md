@@ -29,6 +29,7 @@ In Progress。Phase 1 架构映射已形成 legacy spec 和 evidence；architect
 - Legacy spec: [2026-05-24 reference architecture adoption design](../superpowers/specs/2026-05-24-reference-architecture-adoption-design.md)
 - Legacy spec: [2026-05-25 architecture mapping design](../superpowers/specs/2026-05-25-architecture-mapping-design.md)
 - Rebaseline plan: [2026-05-26 architecture skeleton rebaseline](../superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md)
+- Phase 2/3 plan: [2026-05-31 codex adapter and slot control](../superpowers/plans/2026-05-31-codex-adapter-slot-control.md)
 - Related Feature: [F001 equal-room host core](F001-equal-room-host-core.md)
 - ADR: [ADR-001 reference architecture adoption boundary](../decisions/ADR-001-reference-architecture-adoption-boundary.md)
 - Evidence: [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md)
@@ -61,4 +62,4 @@ None yet
 
 ## Next Step
 
-执行 `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md`，让下一轮实现以 project-native Shared Protocol 和 mock main path 为第一能力增量。
+执行 `docs/superpowers/plans/2026-05-31-codex-adapter-slot-control.md`，在已验证的 mock main path 之后接入 Codex Adapter，并把多席位 slot control 保持在 Agent Runtime / runtime coordination 边界内。
