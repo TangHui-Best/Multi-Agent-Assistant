@@ -5,6 +5,11 @@ import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
 import { attachRoomEventSocket, createServer } from '../src/createServer.js';
 
+interface WebSocketTestServer {
+  injectWS(path: string): Promise<{ close(): void }>;
+  close(): Promise<void>;
+}
+
 function createHarness() {
   const messages: MessageRecord[] = [];
   const agents: AgentSeat[] = [
@@ -121,5 +126,71 @@ describe('host server', () => {
     socket.emit('close');
     resolveSubscription?.(unsubscribe);
     await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+  });
+
+  it('waits for active websocket subscriptions during server close', async () => {
+    let releaseUnsubscribe: (() => void) | undefined;
+    let unsubscribeCompleted = false;
+    const unsubscribe = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseUnsubscribe = () => {
+            unsubscribeCompleted = true;
+            resolve();
+          };
+        }),
+    );
+    const harness = createHarness();
+    harness.eventBus.subscribeRoomEvents = vi.fn(async () => unsubscribe);
+    const server = await createServer(harness);
+    await server.ready();
+    await (server as unknown as WebSocketTestServer).injectWS('/ws');
+
+    let closeResolved = false;
+    const closePromise = server.close().then(() => {
+      closeResolved = true;
+    });
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(closeResolved).toBe(false);
+    releaseUnsubscribe?.();
+    await closePromise;
+    expect(unsubscribeCompleted).toBe(true);
+  });
+
+  it('waits for pending websocket subscriptions during server close', async () => {
+    let resolveSubscription: ((unsubscribe: () => Promise<void>) => void) | undefined;
+    let releaseUnsubscribe: (() => void) | undefined;
+    const unsubscribe = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseUnsubscribe = resolve;
+        }),
+    );
+    const harness = createHarness();
+    harness.eventBus.subscribeRoomEvents = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSubscription = resolve;
+        }),
+    );
+    const server = await createServer(harness);
+    await server.ready();
+    await (server as unknown as WebSocketTestServer).injectWS('/ws');
+
+    let closeResolved = false;
+    const closePromise = server.close().then(() => {
+      closeResolved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const closeResolvedBeforeSubscription = closeResolved;
+
+    resolveSubscription?.(unsubscribe);
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+    releaseUnsubscribe?.();
+    await closePromise;
+
+    expect(closeResolvedBeforeSubscription).toBe(false);
   });
 });

@@ -33,6 +33,11 @@ pnpm.cmd install
 pnpm.cmd --filter @multi-agent-assi/shared test
 pnpm.cmd test
 pnpm.cmd build
+pnpm.cmd exec vitest run apps/host/test/createServer.test.ts
+pnpm.cmd test
+python -m unittest tests.test_public_hygiene
+$paths = @(git ls-files) + @(git ls-files --others --exclude-standard); python scripts\public_hygiene.py --root . @paths
+$env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS=('PH_' + [guid]::NewGuid().ToString('N')); $paths = @(git ls-files) + @(git ls-files --others --exclude-standard); python scripts\public_hygiene.py --root . --require-rules --require-env-rules --require-commit-range --commit-range origin/main..HEAD @paths
 pnpm.cmd --filter @multi-agent-assi/host build
 pnpm.cmd --filter @multi-agent-assi/web build
 pnpm.cmd redis:up
@@ -78,9 +83,12 @@ Observed mock response body:
 - Manual Web Console proxy check confirmed POST and WebSocket round trip through Host, Redis, mock runtime, and back to the Web client.
 - Final strict Harness validation passed: 23 markdown files scanned, 11 knowledge artifacts checked, 0 errors, 0 warnings.
 - Final Public Hygiene unit tests passed: 10 tests.
-- Final Public Hygiene scans passed: 83 files checked, 0 static rules loaded for the basic scan, 1 env rule loaded for the fail-closed commit-range scan.
+- Final Public Hygiene scans passed: 81 files checked, 0 static rules loaded for the basic scan, 1 env rule loaded for the fail-closed commit-range scan.
 - Final `pnpm.cmd build` passed.
-- Final `pnpm.cmd test` passed: 7 test files and 20 tests.
+- Phase 1 stabilization follow-up fixed Host WebSocket subscription teardown so active subscriptions are awaited during `server.close()`.
+- Stabilization focused host verification passed: `apps/host/test/createServer.test.ts` with 5 tests.
+- Test hygiene now excludes `.tmp/` work directories from Vitest discovery, so local publish/worktree copies do not inflate the canonical test count.
+- Final `pnpm.cmd test` passed: 8 test files and 26 tests.
 
 ## Redis And SQLite Responsibility
 

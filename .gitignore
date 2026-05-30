@@ -1,6 +1,7 @@
 .agent/
 .superpowers/
 .worktrees/
+.tmp/
 .public-hygiene/forbidden-patterns.local.txt
 node_modules/
 __pycache__/

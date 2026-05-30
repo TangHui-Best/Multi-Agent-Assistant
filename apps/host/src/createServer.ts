@@ -19,9 +19,19 @@ interface RoomEventSocket {
 
 const SOCKET_OPEN = 1;
 
-export function attachRoomEventSocket(eventBus: EventBus, socket: RoomEventSocket): void {
+interface RoomEventSocketSubscription {
+  close(): Promise<void>;
+  closed: Promise<void>;
+}
+
+export function attachRoomEventSocket(eventBus: EventBus, socket: RoomEventSocket): RoomEventSocketSubscription {
   let closed = false;
   let unsubscribe: (() => Promise<void>) | undefined;
+  let closePromise: Promise<void> | undefined;
+  let resolveClosed: (() => void) | undefined;
+  const closedPromise = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
 
   const sendEvent = (event: RoomEvent) => {
     if (closed || (socket.readyState !== undefined && socket.readyState !== SOCKET_OPEN)) {
@@ -30,23 +40,50 @@ export function attachRoomEventSocket(eventBus: EventBus, socket: RoomEventSocke
     socket.send(JSON.stringify(event));
   };
 
-  void eventBus.subscribeRoomEvents(sendEvent).then((nextUnsubscribe) => {
+  const subscriptionReady = eventBus.subscribeRoomEvents(sendEvent).then(async (nextUnsubscribe) => {
     if (closed) {
-      void nextUnsubscribe();
+      await nextUnsubscribe();
       return;
     }
     unsubscribe = nextUnsubscribe;
+  }).catch((err) => {
+    if (!closed) {
+      console.warn('Unable to subscribe websocket to room events', err);
+    }
   });
 
-  socket.on('close', () => {
+  const close = async () => {
+    if (closePromise) return closePromise;
     closed = true;
-    void unsubscribe?.();
+    closePromise = (async () => {
+      if (unsubscribe) {
+        const nextUnsubscribe = unsubscribe;
+        unsubscribe = undefined;
+        await nextUnsubscribe();
+        return;
+      }
+      await subscriptionReady;
+    })().finally(() => {
+      resolveClosed?.();
+    });
+    return closePromise;
+  };
+
+  socket.on('close', () => {
+    void close();
   });
+
+  return { close, closed: closedPromise };
 }
 
 export async function createServer(deps: CreateServerDeps): Promise<FastifyInstance> {
   const server = Fastify({ logger: false });
+  const roomEventSubscriptions = new Set<RoomEventSocketSubscription>();
   await server.register(websocket);
+
+  server.addHook('onClose', async () => {
+    await Promise.all([...roomEventSubscriptions].map((subscription) => subscription.close()));
+  });
 
   server.get('/api/health', async () => ({ ok: true }));
 
@@ -65,7 +102,11 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
   });
 
   server.get('/ws', { websocket: true }, (socket) => {
-    attachRoomEventSocket(deps.eventBus, socket);
+    const subscription = attachRoomEventSocket(deps.eventBus, socket);
+    roomEventSubscriptions.add(subscription);
+    void subscription.closed.finally(() => {
+      roomEventSubscriptions.delete(subscription);
+    });
   });
 
   return server;
