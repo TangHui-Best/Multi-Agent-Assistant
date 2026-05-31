@@ -26,6 +26,19 @@ function createAgent(id: string): AgentSeat {
   };
 }
 
+function createAgentMessage(input: { invocation: InvocationRecord; body: string; createdAt?: number }): MessageRecord {
+  return {
+    id: `message-${input.invocation.id}`,
+    roomId: input.invocation.roomId,
+    threadId: input.invocation.threadId,
+    kind: 'agent_message',
+    sender: { type: 'agent', agentId: input.invocation.agentId },
+    body: input.body,
+    invocationId: input.invocation.id,
+    createdAt: input.createdAt ?? Date.now(),
+  };
+}
+
 function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
   const messages: MessageRecord[] = [];
   const invocations: InvocationRecord[] = [];
@@ -236,10 +249,11 @@ test('design_review_execute creates a persisted round and queues only the archit
   expect(events.map((event) => event.type)).toContain('round.created');
 });
 
-test('continueRoundAfterInvocation queues reviewer then implementer and completes the round', async () => {
-  const { invocations, jobs, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+test('continueRoundAfterInvocation queues reviewer then approved implementer and completes the round', async () => {
+  const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
   const architectInvocation = invocations[0];
+  messages.push(createAgentMessage({ invocation: architectInvocation, body: 'Architecture plan v1' }));
 
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(architectInvocation.id);
   expect(reviewerInvocation).toMatchObject({ agentId: 'reviewer', roundId: rounds[0].id, roundStepId: roundSteps[1].id });
@@ -247,12 +261,73 @@ test('continueRoundAfterInvocation queues reviewer then implementer and complete
   expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[0].id, 'succeeded', { invocationId: architectInvocation.id });
   expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'queued', { invocationId: reviewerInvocation?.id });
 
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: approved\nNo blockers.' }));
   const implementerInvocation = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
   expect(implementerInvocation).toMatchObject({ agentId: 'implementer', roundId: rounds[0].id, roundStepId: roundSteps[2].id });
 
   const done = await roomHub.continueRoundAfterInvocation(implementerInvocation!.id);
   expect(done).toBeNull();
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'succeeded');
+});
+
+test('design_review_execute prompts reviewer with architect output and requires verdict before implementer', async () => {
+  const { invocations, jobs, messages, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  const architectInvocation = invocations[0];
+  messages.push(createAgentMessage({ invocation: architectInvocation, body: 'Architecture plan v1' }));
+
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(architectInvocation.id);
+
+  expect(reviewerInvocation).toMatchObject({ agentId: 'reviewer', roundId: rounds[0].id, roundStepId: roundSteps[1].id });
+  expect(jobs.at(-1)).toMatchObject({
+    agentId: 'reviewer',
+    prompt: expect.stringContaining('Architect output:\nArchitecture plan v1'),
+  });
+  expect(jobs.at(-1)?.prompt).toContain('VERDICT: approved or VERDICT: changes_requested');
+
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: approved\nShip it.' }));
+  const implementerInvocation = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
+
+  expect(implementerInvocation).toMatchObject({ agentId: 'implementer', roundId: rounds[0].id, roundStepId: roundSteps[2].id });
+  expect(jobs.at(-1)).toMatchObject({
+    agentId: 'implementer',
+    prompt: expect.stringContaining('Reviewer output:\nVERDICT: approved\nShip it.'),
+  });
+});
+
+test('reviewer changes requested verdict stops the round without queuing implementer', async () => {
+  const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: changes_requested\nMissing recovery tests.' }));
+
+  const result = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
+
+  expect(result).toBeNull();
+  expect(jobs.map((job) => job.agentId)).toEqual(['architect', 'reviewer']);
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'succeeded', { invocationId: reviewerInvocation!.id });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[2].id, 'canceled', {
+    error: 'Reviewer gate stopped round: changes_requested',
+  });
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'Reviewer gate stopped round: changes_requested');
+});
+
+test('missing reviewer verdict stops the round without queuing implementer', async () => {
+  const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'Looks good, but no explicit verdict.' }));
+
+  const result = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
+
+  expect(result).toBeNull();
+  expect(jobs.map((job) => job.agentId)).toEqual(['architect', 'reviewer']);
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[2].id, 'canceled', {
+    error: 'Reviewer gate stopped round: missing verdict',
+  });
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'Reviewer gate stopped round: missing verdict');
 });
 
 test('same idempotency key returns the original message and invocations without duplicate jobs', async () => {

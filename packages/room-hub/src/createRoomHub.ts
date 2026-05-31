@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentId, AgentJob, InvocationRecord, MessageRecord, RoundRecord, RoundStepRecord, SubmitMessageInput } from '@multi-agent-assi/shared';
+import {
+  buildArchitectPrompt,
+  buildImplementerPrompt,
+  buildReviewerPrompt,
+  DESIGN_REVIEW_EXECUTE_STEP_AGENT_IDS,
+  parseReviewerVerdict,
+} from './orchestrationPolicy.js';
 
 export interface RoomHub {
   submitMessage(input: SubmitMessageInput): Promise<{ message: MessageRecord; invocations: InvocationRecord[] }>;
@@ -11,7 +18,7 @@ export interface RoomHub {
 }
 
 const BROADCAST_TARGETS: AgentId[] = ['architect', 'reviewer', 'implementer'];
-const DESIGN_REVIEW_EXECUTE_STEPS: AgentId[] = ['architect', 'reviewer', 'implementer'];
+const DESIGN_REVIEW_EXECUTE_STEPS: AgentId[] = [...DESIGN_REVIEW_EXECUTE_STEP_AGENT_IDS];
 
 function dedupeTargets(agentIds: AgentId[]): AgentId[] {
   const seen = new Set<AgentId>();
@@ -123,6 +130,14 @@ function createInvocation(input: {
     ...(input.roundId ? { roundId: input.roundId } : {}),
     ...(input.roundStepId ? { roundStepId: input.roundStepId } : {}),
   };
+}
+
+function findInvocationMessage(messages: MessageRecord[], invocationId: string): MessageRecord | undefined {
+  return messages.find((message) => message.invocationId === invocationId);
+}
+
+function findStepInvocation(invocations: InvocationRecord[], stepId: string): InvocationRecord | undefined {
+  return invocations.find((invocation) => invocation.roundStepId === stepId);
 }
 
 function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<AgentId>, now: number): {
@@ -269,7 +284,7 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
             threadId: input.threadId,
             sourceMessageId: message.id,
             agentId: invocation.agentId,
-            prompt: input.body,
+            prompt: input.target.mode === 'orchestrated' ? buildArchitectPrompt(message) : input.body,
           });
         } catch (err) {
           await failInvocationsFrom(deps, invocations, index, getErrorMessage(err));
@@ -332,10 +347,23 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       if (!sourceMessage) {
         throw new Error(`Source message not found: ${completedInvocation.sourceMessageId}`);
       }
-      const previousMessage = threadMessages.find((message) => message.invocationId === completedInvocation.id);
-      const prompt = previousMessage
-        ? `Original request:\n${sourceMessage.body}\n\nPrevious ${completedInvocation.agentId} output:\n${previousMessage.body}`
-        : sourceMessage.body;
+      const currentMessage = findInvocationMessage(threadMessages, completedInvocation.id);
+      const roundInvocations = deps.repositories.listInvocationsBySourceMessage(sourceMessage.id);
+      const architectInvocation = findStepInvocation(roundInvocations, steps[0].id);
+      const architectMessage = architectInvocation ? findInvocationMessage(threadMessages, architectInvocation.id) : undefined;
+      const prompt = nextStep.agentId === 'reviewer'
+        ? buildReviewerPrompt({ sourceMessage, architectMessage: currentMessage })
+        : buildImplementerPrompt({ sourceMessage, architectMessage, reviewerMessage: currentMessage ?? sourceMessage });
+
+      if (currentStep.agentId === 'reviewer') {
+        const verdict = currentMessage ? parseReviewerVerdict(currentMessage.body) : null;
+        if (verdict !== 'approved') {
+          const error = `Reviewer gate stopped round: ${verdict ?? 'missing verdict'}`;
+          deps.repositories.updateRoundStepStatus(nextStep.id, 'canceled', { error });
+          deps.repositories.updateRoundStatus(completedInvocation.roundId, 'failed', error);
+          return null;
+        }
+      }
       const nextInvocation = createInvocation({
         message: sourceMessage,
         agentId: nextStep.agentId,
