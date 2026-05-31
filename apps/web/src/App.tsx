@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentSeat, InvocationRecord, InvocationStatus, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
+import type {
+  AgentSeat,
+  InvocationRecord,
+  InvocationStatus,
+  MessageRecord,
+  RoomEvent,
+  RoundRecord,
+  RoundStepRecord,
+  RoundStepStatus,
+} from '@multi-agent-assi/shared';
 import { fetchBootstrap, submitMessage } from './api.js';
 import './styles.css';
 
@@ -13,12 +22,21 @@ export function mergeRoomEvent(messages: MessageRecord[], event: RoomEvent): Mes
   return [...messages, nextMessage].sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function upsertInvocation(invocations: InvocationRecord[], next: InvocationRecord): InvocationRecord[] {
-  const existingIndex = invocations.findIndex((invocation) => invocation.id === next.id);
+export interface RoundProjectionState {
+  rounds: RoundRecord[];
+  roundSteps: RoundStepRecord[];
+}
+
+function upsertById<T extends { id: string; createdAt: number }>(items: T[], next: T): T[] {
+  const existingIndex = items.findIndex((item) => item.id === next.id);
   if (existingIndex < 0) {
-    return [...invocations, next].sort((a, b) => a.createdAt - b.createdAt);
+    return [...items, next].sort((a, b) => a.createdAt - b.createdAt);
   }
-  return invocations.map((invocation, index) => (index === existingIndex ? { ...invocation, ...next } : invocation));
+  return items.map((item, index) => (index === existingIndex ? { ...item, ...next } : item));
+}
+
+function upsertInvocation(invocations: InvocationRecord[], next: InvocationRecord): InvocationRecord[] {
+  return upsertById(invocations, next);
 }
 
 function updateInvocation(
@@ -60,6 +78,19 @@ export function mergeInvocationEvent(invocations: InvocationRecord[], event: Roo
     return updateInvocation(invocations, event, 'canceled', event.reason);
   }
   return invocations;
+}
+
+export function mergeRoundEvent(state: RoundProjectionState, event: RoomEvent): RoundProjectionState {
+  if (event.type !== 'round.created') return state;
+  return {
+    rounds: upsertById(state.rounds, event.round),
+    roundSteps: event.steps.reduce((steps, step) => upsertById(steps, step), state.roundSteps),
+  };
+}
+
+export function deriveRoundStepStatus(step: RoundStepRecord, invocations: InvocationRecord[]): RoundStepStatus {
+  const linkedInvocation = step.invocationId ? invocations.find((invocation) => invocation.id === step.invocationId) : undefined;
+  return linkedInvocation?.status ?? step.status;
 }
 
 function senderLabel(message: MessageRecord): string {

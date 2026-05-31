@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
-import { mergeInvocationEvent, mergeRoomEvent } from './App.js';
+import type { InvocationRecord, MessageRecord, RoomEvent, RoundRecord, RoundStepRecord } from '@multi-agent-assi/shared';
+import { deriveRoundStepStatus, mergeInvocationEvent, mergeRoomEvent, mergeRoundEvent } from './App.js';
 
 const message: MessageRecord = {
   id: 'msg-1',
@@ -83,5 +83,68 @@ describe('mergeInvocationEvent', () => {
     expect(final).toEqual([
       expect.objectContaining({ id: 'inv-1', agentId: 'architect', status: 'canceled', error: 'user requested stop' }),
     ]);
+  });
+});
+
+describe('mergeRoundEvent', () => {
+  const round: RoundRecord = {
+    id: 'round-1',
+    roomId: 'default-room',
+    threadId: 'default-thread',
+    sourceMessageId: 'msg-1',
+    workflow: 'design_review_execute',
+    status: 'running',
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const steps: RoundStepRecord[] = [
+    {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'queued',
+      invocationId: 'inv-1',
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ];
+
+  it('adds round.created events without duplicating rounds or steps', () => {
+    const event: RoomEvent = { type: 'round.created', roomId: 'default-room', threadId: 'default-thread', round, steps, occurredAt: 1 };
+
+    const first = mergeRoundEvent({ rounds: [], roundSteps: [] }, event);
+    const duplicate = mergeRoundEvent(first, event);
+
+    expect(duplicate.rounds.map((item) => item.id)).toEqual(['round-1']);
+    expect(duplicate.roundSteps.map((item) => item.id)).toEqual(['step-1']);
+  });
+});
+
+describe('deriveRoundStepStatus', () => {
+  it('prefers linked invocation status over persisted step status', () => {
+    const step: RoundStepRecord = {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'queued',
+      invocationId: 'inv-1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const invocation: InvocationRecord = {
+      id: 'inv-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'failed',
+      error: 'adapter failed',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    expect(deriveRoundStepStatus(step, [invocation])).toBe('failed');
   });
 });
