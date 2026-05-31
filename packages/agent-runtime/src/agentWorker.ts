@@ -264,7 +264,6 @@ export function createAgentWorker(deps: {
       await deps.eventBus.ackAgentJob(consumerGroup, streamId);
       return true;
     }
-    if (initialStatus === 'running') return false;
 
     const acquired = await deps.eventBus.acquireAgentSlotLease(job.agentId, workerId, slotLeaseTtlMs);
     if (!acquired) {
@@ -272,6 +271,16 @@ export function createAgentWorker(deps: {
     }
 
     try {
+      const leasedStatus = getInvocationStatus(deps.repositories, job.invocationId);
+      if (isTerminalInvocationStatus(leasedStatus)) {
+        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+        return true;
+      }
+      if (leasedStatus === 'running') {
+        await markAndPublishFailure(deps, job, 'Stale running invocation recovered after slot lease expired');
+        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+        return true;
+      }
       const processed = await processJob({
         repositories: deps.repositories,
         eventBus: deps.eventBus,

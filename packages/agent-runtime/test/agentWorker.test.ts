@@ -524,6 +524,49 @@ test('acks without running when queued to running transition is rejected by pers
   expect(statusUpdates).toEqual([]);
 });
 
+test('fails and acks a stale running invocation when the slot lease is available', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, audits, events, repositories, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'running',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(adapter.run).not.toHaveBeenCalled();
+  expect(statusUpdates).toContainEqual({
+    id: job.invocationId,
+    status: 'failed',
+    error: 'Stale running invocation recovered after slot lease expired',
+  });
+  expect(audits).toContainEqual(expect.objectContaining({
+    invocationId: job.invocationId,
+    eventType: 'invocation.failed',
+    reason: 'Stale running invocation recovered after slot lease expired',
+  }));
+  expect(events).toContainEqual(expect.objectContaining({
+    type: 'invocation.failed',
+    invocationId: job.invocationId,
+    error: 'Stale running invocation recovered after slot lease expired',
+  }));
+});
+
 test('serializes jobs for the same agent seat', async () => {
   const jobs = [
     { streamId: 'stream-1', job: createJob({ invocationId: 'invocation-1', agentId: 'architect' }) },
