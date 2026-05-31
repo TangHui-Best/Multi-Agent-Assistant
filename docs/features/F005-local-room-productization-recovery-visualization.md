@@ -1,7 +1,7 @@
 ---
 id: F005
 doc_kind: feature
-status: active
+status: completed
 created: 2026-05-31
 updated: 2026-05-31
 ---
@@ -22,7 +22,7 @@ updated: 2026-05-31
 
 ## Current Status
 
-In Progress. 本 Feature 是 F001 的产品化切片，也是 F004 后续工作的第一步。当前先沉淀设计与计划，然后按 TDD 实现最小可验收链路。
+Completed. 本 Feature 已把 F004 留下的 persisted recovery 数据暴露为本地 Web Console 可读的产品化视图：Host 提供 rounds、round steps 与 invocation audit read projection，Web Console 以 bootstrap 与 room events 的投影展示 round 进度、step 状态和 selected invocation recovery detail。
 
 ## Links
 
@@ -31,30 +31,31 @@ In Progress. 本 Feature 是 F001 的产品化切片，也是 F004 后续工作�
 - ADR: [ADR-002 invocation orchestration and recovery contracts](../decisions/ADR-002-invocation-orchestration-recovery-contracts.md)
 - Prior Evidence: [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md)
 - Design spec: [2026-05-31 local room productization recovery visualization](../superpowers/specs/2026-05-31-local-room-productization-recovery-visualization-design.md)
+- Implementation plan: [2026-05-31 local room productization recovery visualization](../superpowers/plans/2026-05-31-local-room-productization-recovery-visualization.md)
+- Evidence: [EV-011 local room recovery visualization](../evidence/EV-011-local-room-recovery-visualization.md)
 
 ## Acceptance Criteria
 
-- [ ] `GET /api/bootstrap` returns the default thread's persisted rounds and round steps in addition to agents, messages, and invocations.
-- [ ] Host exposes a read-only invocation audit endpoint backed by SQLite `invocation_audit_logs`.
-- [ ] Web Console keeps local view state for rounds and round steps only as a projection of bootstrap and room events, not as a source of truth.
-- [ ] Web Console displays `design_review_execute` round progress with ordered architect -> reviewer -> implementer steps.
-- [ ] Step display derives the visible execution state from linked invocation status when available, so stale round step rows do not hide terminal invocation state.
-- [ ] Web Console can show selected invocation recovery details: status, source message id, runtime session id, resume metadata, and audit timeline.
-- [ ] The implementation keeps retry/resume execution out of scope and records that follow-up under Recovery / Session Continuity 2.0.
-- [ ] Automated tests cover bootstrap projection, audit endpoint behavior, round event merging, step status derivation, and recovery detail rendering.
+- [x] `GET /api/bootstrap` returns the default thread's persisted rounds and round steps in addition to agents, messages, and invocations.
+- [x] Host exposes a read-only invocation audit endpoint backed by SQLite `invocation_audit_logs`.
+- [x] Web Console keeps local view state for rounds and round steps only as a projection of bootstrap and room events, not as a source of truth.
+- [x] Web Console displays `design_review_execute` round progress with ordered architect -> reviewer -> implementer steps.
+- [x] Step display derives the visible execution state from linked invocation status when available, so stale round step rows do not hide terminal invocation state.
+- [x] Web Console can show selected invocation recovery details: status, source message id, runtime session id, resume metadata, and audit timeline.
+- [x] The implementation keeps retry/resume execution out of scope and records that follow-up under Recovery / Session Continuity 2.0.
+- [x] Automated tests cover bootstrap projection, audit endpoint behavior, round event merging, step status derivation, and recovery detail rendering.
 
 ## Patch History
 
-None yet
-
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
 | --- | --- | --- | --- | --- | --- | --- |
+| F005.1 | 2026-05-31 | `7cc1421` | WebSocket live projection could be overwritten by slower bootstrap, and selected audit detail could show stale entries while reloading. | Bootstrap replacement treated the older durable snapshot as authoritative over newer room events, and audit loading state was keyed only by invocation id. | `mergeBootstrapState` and audit loading helper tests now preserve newer live status while backfilling durable fields and clearing old audit entries during refresh. | Closed |
 
 ## Evidence
 
 - F004 and EV-010 prove that the underlying persisted recovery data already exists.
-- This Feature will receive implementation Evidence after the UI/API slice is built and verified.
+- EV-011 records the F005 implementation commits, automated verification, visual screenshot, independent reviews, and residual risks.
 
 ## Next Step
 
-Write the implementation plan for the read projection, round UI, and recovery detail slices, then implement with TDD and a small commit sequence.
+Proceed to Orchestration Policy Layer before Recovery / Session Continuity 2.0. The next phase should make reviewer gates, round verdicts, and convergence policy explicit before adding automatic restart/resume execution.

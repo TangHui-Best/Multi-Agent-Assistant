@@ -62,7 +62,8 @@ None yet
 - [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) records the local Phase 1 skeleton runtime path through Web Console, Host API, Room Hub, SQLite, Redis, mock Agent Runtime, WebSocket, and back to Web Console.
 - [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md) records the first real Codex Adapter Room Hub path and in-process per-agent slot control evidence.
 - [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md) records Redis-backed slot lease integration in Agent Runtime and Event Bus pending/stale recovery.
+- [EV-011 local room recovery visualization](../evidence/EV-011-local-room-recovery-visualization.md) records the Web Console productization slice for round progress, recovery metadata, and invocation audit timeline.
 
 ## Next Step
 
-Continue closing F001 by making recovery and orchestration visible in the Web Console: round-step status, audit timeline, and resume metadata should be inspectable without moving core state into the frontend.
+Continue closing F001 by making orchestration policy explicit: reviewer gates, round verdicts, and convergence rules should become durable policy behavior before automatic restart/resume or remote connectors are added.
