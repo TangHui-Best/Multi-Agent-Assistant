@@ -22,6 +22,7 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
   const audits: InvocationAuditRecord[] = [];
   const acknowledgements: Array<{ consumerGroup: string; streamId: string }> = [];
+  let roomEventHandler: ((event: RoomEvent) => void) | undefined;
   const seat =
     options.seat ??
     ({
@@ -68,7 +69,12 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
     }),
     acquireAgentSlotLease: vi.fn(async () => true),
     releaseAgentSlotLease: vi.fn(async () => {}),
-    subscribeRoomEvents: vi.fn(async () => async () => {}),
+    subscribeRoomEvents: vi.fn(async (handler) => {
+      roomEventHandler = handler;
+      return async () => {
+        roomEventHandler = undefined;
+      };
+    }),
     close: vi.fn(async () => {}),
   };
 
@@ -80,6 +86,9 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
     repositories,
     statusUpdates,
     audits,
+    publishRoomEventToWorker(event: RoomEvent) {
+      roomEventHandler?.(event);
+    },
     worker: createAgentWorker({
       repositories,
       eventBus,
@@ -201,6 +210,58 @@ test('passes an abort signal to the runtime adapter', async () => {
 
   expect(receivedSignal).toBeInstanceOf(AbortSignal);
   expect(receivedSignal?.aborted).toBe(false);
+});
+
+test('aborts a running adapter when a matching invocation cancellation event arrives', async () => {
+  const job = createJob();
+  let receivedSignal: AbortSignal | undefined;
+  let resolveStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(
+      ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          receivedSignal = signal;
+          resolveStarted?.();
+          signal.addEventListener('abort', () => reject(new Error('adapter canceled')));
+        }),
+    ),
+  };
+  const { acknowledgements, publishRoomEventToWorker, repositories, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await started;
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'canceled',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+  publishRoomEventToWorker({
+    type: 'invocation.canceled',
+    roomId: job.roomId,
+    threadId: job.threadId,
+    invocationId: job.invocationId,
+    agentId: job.agentId,
+    reason: 'user requested stop',
+    occurredAt: 2,
+  });
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(receivedSignal?.aborted).toBe(true);
+  expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(job.invocationId, 'running');
+  expect(repositories.updateInvocationStatus).not.toHaveBeenCalledWith(job.invocationId, 'failed', expect.anything());
 });
 
 test('fails and acks only the current invocation when no adapter exists for the seat runtime', async () => {

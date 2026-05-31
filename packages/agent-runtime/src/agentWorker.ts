@@ -95,6 +95,7 @@ async function processJob(
     repositories: PersistenceRepositories;
     eventBus: EventBus;
     adapters: Map<RuntimeKind, RuntimeAdapter>;
+    abortControllers: Map<string, AbortController>;
   },
   streamId: string,
   job: AgentJob,
@@ -109,6 +110,7 @@ async function processJob(
     const seat = findSeat(deps.repositories, job.agentId);
     const adapter = findAdapter(deps.adapters, seat.runtime.kind);
     const abortController = new AbortController();
+    deps.abortControllers.set(job.invocationId, abortController);
 
     deps.repositories.updateInvocationStatus(job.invocationId, 'running');
     appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.running');
@@ -175,10 +177,15 @@ async function processJob(
     });
   } catch (err) {
     if (!durableSuccess) {
+      if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
+        return;
+      }
       await markAndPublishFailure(deps, job, getErrorMessage(err));
     } else {
       console.warn(`Agent worker completed durable output but a later event publish failed: ${streamId}`, err);
     }
+  } finally {
+    deps.abortControllers.delete(job.invocationId);
   }
 }
 
@@ -192,14 +199,17 @@ export function createAgentWorker(deps: {
   let stopped = true;
   let timer: NodeJS.Timeout | null = null;
   let activeTick: Promise<void> | null = null;
+  let unsubscribeRoomEvents: (() => Promise<void>) | null = null;
+  let subscriptionReady: Promise<void> | null = null;
   const consumerGroup = deps.consumerGroup ?? 'agent-runtime-workers';
   const consumerName = `worker-${process.pid}`;
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.kind, adapter]));
+  const abortControllers = new Map<string, AbortController>();
 
   async function processJobGroup(group: AgentJobEnvelope[]): Promise<void> {
     for (const { streamId, job } of group) {
       if (stopped) return;
-      await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters }, streamId, job);
+      await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters, abortControllers }, streamId, job);
       await deps.eventBus.ackAgentJob(consumerGroup, streamId);
     }
   }
@@ -238,6 +248,22 @@ export function createAgentWorker(deps: {
     start() {
       if (!stopped) return;
       stopped = false;
+      subscriptionReady = deps.eventBus
+        .subscribeRoomEvents((event) => {
+          if (event.type === 'invocation.canceled') {
+            abortControllers.get(event.invocationId)?.abort(new Error(event.reason ?? 'invocation canceled'));
+          }
+        })
+        .then((unsubscribe) => {
+          if (stopped) {
+            void unsubscribe();
+            return;
+          }
+          unsubscribeRoomEvents = unsubscribe;
+        })
+        .catch((err) => {
+          console.warn('Agent worker cancellation subscription failed; polling will continue', err);
+        });
       activeTick = tick();
     },
     async stop() {
@@ -245,6 +271,16 @@ export function createAgentWorker(deps: {
       if (timer) {
         clearTimeout(timer);
         timer = null;
+      }
+      for (const controller of abortControllers.values()) {
+        controller.abort(new Error('agent worker stopped'));
+      }
+      if (unsubscribeRoomEvents) {
+        const unsubscribe = unsubscribeRoomEvents;
+        unsubscribeRoomEvents = null;
+        await unsubscribe();
+      } else {
+        await subscriptionReady;
       }
       await activeTick;
     },
