@@ -498,14 +498,26 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         }
 
         if (invocation.roundId && nonTerminalRoundIds.has(invocation.roundId) && invocation.status === 'succeeded') {
-          await this.continueRoundAfterInvocation(invocation.id);
-          result.continued.push(invocation.id);
+          const nextInvocation = await this.continueRoundAfterInvocation(invocation.id);
+          if (nextInvocation) {
+            result.continued.push(invocation.id);
+          } else {
+            const latestRound = deps.repositories.listRoundsByThread(threadId).find((round) => round.id === invocation.roundId);
+            if (latestRound?.status === 'succeeded') {
+              result.continued.push(invocation.id);
+            }
+          }
           continue;
         }
 
         if (invocation.roundId && nonTerminalRoundIds.has(invocation.roundId) && (invocation.status === 'failed' || invocation.status === 'canceled')) {
+          const beforeRound = deps.repositories.listRoundsByThread(threadId).find((round) => round.id === invocation.roundId);
+          const beforeRoundSnapshot = beforeRound ? { status: beforeRound.status, error: beforeRound.error } : undefined;
           await settleRoundAfterInvocation(invocation.id, invocation.status, invocation.error);
-          result.settled.push(invocation.id);
+          const afterRound = deps.repositories.listRoundsByThread(threadId).find((round) => round.id === invocation.roundId);
+          if (beforeRoundSnapshot?.status !== afterRound?.status || beforeRoundSnapshot?.error !== afterRound?.error) {
+            result.settled.push(invocation.id);
+          }
         }
       }
 

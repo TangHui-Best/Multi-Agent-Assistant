@@ -593,6 +593,22 @@ test('recoverThreadContinuity continues succeeded round-linked invocations throu
   expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
 });
 
+test('recoverThreadContinuity is idempotent after it queues the next round step', async () => {
+  const { invocations, jobs, messages, roomHub } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  jobs.length = 0;
+
+  const first = await roomHub.recoverThreadContinuity('thread-1');
+  const second = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(first.continued).toEqual([invocations[0].id]);
+  expect(second.continued).toEqual([]);
+  expect(jobs.map((job) => job.agentId)).toEqual(['reviewer', 'reviewer']);
+  expect(jobs.every((job) => job.invocationId !== invocations[0].id)).toBe(true);
+});
+
 test('recoverThreadContinuity settles failed round-linked invocations left before round convergence', async () => {
   const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
