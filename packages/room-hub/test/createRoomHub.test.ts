@@ -532,3 +532,76 @@ test('cancelInvocation does not overwrite an already succeeded invocation', asyn
   expect(rounds[0].status).toBe('running');
   expect(events.at(-1)).not.toMatchObject({ type: 'invocation.canceled' });
 });
+
+test('recoverThreadContinuity re-enqueues queued invocations from persisted source messages', async () => {
+  const { audits, invocations, jobs, roomHub } = createHarness(['architect']);
+  await roomHub.submitMessage(createInput({ mode: 'mention', agentIds: ['architect'] }));
+  jobs.length = 0;
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.requeued).toEqual([invocations[0].id]);
+  expect(jobs).toEqual([
+    expect.objectContaining({
+      invocationId: invocations[0].id,
+      agentId: 'architect',
+      prompt: 'Review the plan',
+    }),
+  ]);
+  expect(audits).toContainEqual(expect.objectContaining({ invocationId: invocations[0].id, eventType: 'recovery.requeued' }));
+});
+
+test('recoverThreadContinuity fails stale running invocations and settles linked rounds', async () => {
+  const { audits, events, invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'running';
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.failed).toEqual([invocations[0].id]);
+  expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(
+    invocations[0].id,
+    'failed',
+    'Recovered stale running invocation after host restart',
+  );
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(
+    rounds[0].id,
+    'failed',
+    'Recovered stale running invocation after host restart',
+  );
+  expect(roundSteps.map((step) => step.status)).toEqual(['failed', 'canceled', 'canceled']);
+  expect(audits).toContainEqual(expect.objectContaining({ invocationId: invocations[0].id, eventType: 'recovery.stale_running_failed' }));
+  expect(events).toContainEqual(expect.objectContaining({ type: 'invocation.failed', invocationId: invocations[0].id }));
+});
+
+test('recoverThreadContinuity continues succeeded round-linked invocations through policy', async () => {
+  const { invocations, jobs, messages, roomHub, roundSteps } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  jobs.length = 0;
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.continued).toEqual([invocations[0].id]);
+  expect(jobs).toEqual([
+    expect.objectContaining({
+      agentId: 'reviewer',
+      prompt: expect.stringContaining('Architect output:\nArchitecture plan v1'),
+    }),
+  ]);
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
+});
+
+test('recoverThreadContinuity settles failed round-linked invocations left before round convergence', async () => {
+  const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'failed';
+  invocations[0].error = 'adapter failed before settle callback';
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.settled).toEqual([invocations[0].id]);
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'adapter failed before settle callback');
+  expect(roundSteps.map((step) => step.status)).toEqual(['failed', 'canceled', 'canceled']);
+});

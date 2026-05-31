@@ -15,6 +15,7 @@ export interface RoomHub {
   cancelInvocation(invocationId: string, reason?: string): Promise<InvocationRecord>;
   continueRoundAfterInvocation(invocationId: string): Promise<InvocationRecord | null>;
   settleRoundAfterInvocation(invocationId: string, status: 'failed' | 'canceled', reason?: string): Promise<void>;
+  recoverThreadContinuity(threadId: string): Promise<{ requeued: string[]; failed: string[]; continued: string[]; settled: string[] }>;
   listMessages(threadId: string): Promise<MessageRecord[]>;
 }
 
@@ -153,6 +154,22 @@ function isTerminalStepStatus(status: RoundStepRecord['status']): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'canceled';
 }
 
+function appendRecoveryAudit(
+  repositories: PersistenceRepositories,
+  invocationId: string,
+  eventType: string,
+  options: { reason?: string; metadata?: Record<string, unknown> } = {},
+): void {
+  repositories.appendInvocationAudit({
+    id: randomUUID(),
+    invocationId,
+    eventType,
+    occurredAt: Date.now(),
+    ...(options.reason ? { reason: options.reason } : {}),
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+  });
+}
+
 function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<AgentId>, now: number): {
   round: RoundRecord;
   steps: RoundStepRecord[];
@@ -191,6 +208,33 @@ function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<Agen
 }
 
 export function createRoomHub(deps: { repositories: PersistenceRepositories; eventBus: EventBus }): RoomHub {
+  function reconstructPrompt(invocation: InvocationRecord, messages: MessageRecord[], invocations: InvocationRecord[]): string | null {
+    const sourceMessage = messages.find((message) => message.id === invocation.sourceMessageId);
+    if (!sourceMessage) return null;
+    if (!invocation.roundId || !invocation.roundStepId) {
+      return sourceMessage.body;
+    }
+
+    const steps = deps.repositories.listRoundSteps(invocation.roundId);
+    const step = steps.find((candidate) => candidate.id === invocation.roundStepId);
+    if (!step) return null;
+    if (step.agentId === 'architect') {
+      return buildArchitectPrompt(sourceMessage);
+    }
+
+    const architectInvocation = findStepInvocation(invocations, steps[0].id);
+    const architectMessage = architectInvocation ? findInvocationMessage(messages, architectInvocation.id) : undefined;
+    if (step.agentId === 'reviewer') {
+      return buildReviewerPrompt({ sourceMessage, architectMessage });
+    }
+
+    const reviewerStep = steps.find((candidate) => candidate.agentId === 'reviewer');
+    const reviewerInvocation = reviewerStep ? findStepInvocation(invocations, reviewerStep.id) : undefined;
+    const reviewerMessage = reviewerInvocation ? findInvocationMessage(messages, reviewerInvocation.id) : undefined;
+    if (!reviewerMessage) return null;
+    return buildImplementerPrompt({ sourceMessage, architectMessage, reviewerMessage });
+  }
+
   async function publishRoundUpdated(input: {
     roundId: string;
     threadId: string;
@@ -410,6 +454,63 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
     },
 
     settleRoundAfterInvocation,
+
+    async recoverThreadContinuity(threadId) {
+      const result = { requeued: [] as string[], failed: [] as string[], continued: [] as string[], settled: [] as string[] };
+      const messages = deps.repositories.listMessages(threadId);
+      const invocations = deps.repositories.listInvocationsByThread(threadId);
+      const rounds = deps.repositories.listRoundsByThread(threadId);
+      const nonTerminalRoundIds = new Set(rounds.filter((round) => !isTerminalRoundStatus(round.status)).map((round) => round.id));
+
+      for (const invocation of invocations) {
+        if (invocation.status === 'queued') {
+          const prompt = reconstructPrompt(invocation, messages, invocations);
+          if (!prompt) {
+            const error = 'Unable to reconstruct prompt during startup recovery';
+            deps.repositories.updateInvocationStatus(invocation.id, 'failed', error);
+            appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.prompt_reconstruction_failed', { reason: error });
+            await publishInvocationFailed(deps, invocation, error);
+            result.failed.push(invocation.id);
+            continue;
+          }
+          appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.requeued', { metadata: { threadId } });
+          await publishAndEnqueueInvocation(deps, invocation, prompt);
+          result.requeued.push(invocation.id);
+          continue;
+        }
+
+        if (invocation.status === 'running') {
+          const error = 'Recovered stale running invocation after host restart';
+          deps.repositories.updateInvocationStatus(invocation.id, 'failed', error);
+          appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.stale_running_failed', { reason: error });
+          await deps.eventBus.publishRoomEvent({
+            type: 'invocation.failed',
+            roomId: invocation.roomId,
+            threadId: invocation.threadId,
+            invocationId: invocation.id,
+            agentId: invocation.agentId,
+            error,
+            occurredAt: Date.now(),
+          });
+          await settleRoundAfterInvocation(invocation.id, 'failed', error);
+          result.failed.push(invocation.id);
+          continue;
+        }
+
+        if (invocation.roundId && nonTerminalRoundIds.has(invocation.roundId) && invocation.status === 'succeeded') {
+          await this.continueRoundAfterInvocation(invocation.id);
+          result.continued.push(invocation.id);
+          continue;
+        }
+
+        if (invocation.roundId && nonTerminalRoundIds.has(invocation.roundId) && (invocation.status === 'failed' || invocation.status === 'canceled')) {
+          await settleRoundAfterInvocation(invocation.id, invocation.status, invocation.error);
+          result.settled.push(invocation.id);
+        }
+      }
+
+      return result;
+    },
 
     async continueRoundAfterInvocation(invocationId) {
       const completedInvocation = deps.repositories.getInvocation(invocationId);
