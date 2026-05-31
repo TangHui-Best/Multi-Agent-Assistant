@@ -1,7 +1,7 @@
 ---
 id: F006
 doc_kind: feature
-status: active
+status: completed
 created: 2026-05-31
 updated: 2026-05-31
 ---
@@ -22,7 +22,7 @@ updated: 2026-05-31
 
 ## Current Status
 
-In Progress. 本 Feature 是 Recovery / Session Continuity 2.0 的前置收敛层：先让 round policy 可以解释为什么继续、停止或失败，再做重启恢复闭环。
+Completed. 本 Feature 已把 `design_review_execute` 的 step order、reviewer verdict gate、prompt context、失败/取消收敛和 live `round.updated` projection 收束到 Room Hub policy path；Recovery / Session Continuity 2.0 可以基于这些 durable facts 做重启恢复扫描。
 
 ## Links
 
@@ -33,17 +33,19 @@ In Progress. 本 Feature 是 Recovery / Session Continuity 2.0 的前置收敛�
 - Prior Evidence: [EV-009 orchestration recovery hardening](../evidence/EV-009-orchestration-recovery-hardening.md)
 - Prior Evidence: [EV-011 local room recovery visualization](../evidence/EV-011-local-room-recovery-visualization.md)
 - Design spec: [2026-05-31 orchestration policy layer](../superpowers/specs/2026-05-31-orchestration-policy-layer.md)
+- Implementation plan: [2026-05-31 orchestration policy layer](../superpowers/plans/2026-05-31-orchestration-policy-layer.md)
+- Evidence: [EV-012 orchestration policy layer](../evidence/EV-012-orchestration-policy-layer.md)
 
 ## Acceptance Criteria
 
-- [ ] `design_review_execute` step definitions and prompt construction live behind a Room Hub orchestration policy module rather than scattered inline constants.
-- [ ] Reviewer output must include a machine-readable verdict before implementer is queued.
-- [ ] Reviewer `approved` verdict queues implementer with original request, architect output, and reviewer verdict context.
-- [ ] Reviewer `changes_requested` or missing verdict stops the round without queuing implementer and records a durable terminal reason.
-- [ ] Failed or canceled round-linked invocations mark the current step and round terminal, and dependent not-yet-run steps are not left as actionable pending work.
-- [ ] Room events expose round/step updates so Web Console projections can converge without waiting for a full refresh.
-- [ ] Automatic retry/resume remains out of scope and is left for Recovery / Session Continuity 2.0.
-- [ ] Automated tests cover reviewer approved, reviewer blocked, missing verdict, invocation failure, invocation cancellation, and live projection update behavior.
+- [x] `design_review_execute` step definitions and prompt construction live behind a Room Hub orchestration policy module rather than scattered inline constants.
+- [x] Reviewer output must include a machine-readable verdict before implementer is queued.
+- [x] Reviewer `approved` verdict queues implementer with original request, architect output, and reviewer verdict context.
+- [x] Reviewer `changes_requested` or missing verdict stops the round without queuing implementer and records a durable terminal reason.
+- [x] Failed or canceled round-linked invocations mark the current step and round terminal, and dependent not-yet-run steps are not left as actionable pending work.
+- [x] Room events expose round/step updates so Web Console projections can converge without waiting for a full refresh.
+- [x] Automatic retry/resume remains out of scope and is left for Recovery / Session Continuity 2.0.
+- [x] Automated tests cover reviewer approved, reviewer blocked, missing verdict, invocation failure, invocation cancellation, and live projection update behavior.
 
 ## Patch History
 
@@ -52,8 +54,8 @@ In Progress. 本 Feature 是 Recovery / Session Continuity 2.0 的前置收敛�
 
 ## Evidence
 
-Pending implementation Evidence.
+- EV-012 records implementation commits, review findings, verification commands, recovery path, and residual risks.
 
 ## Next Step
 
-Implement the smallest policy layer that makes the current single workflow explicit and terminal-state safe, then capture EV-012 before starting Recovery / Session Continuity 2.0.
+Proceed to Recovery / Session Continuity 2.0. The next phase should reconcile persisted invocations, rounds, steps, audit logs, and runtime session metadata after restart without introducing connector-owned state.
