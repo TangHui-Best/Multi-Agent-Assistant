@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
-import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
+import type { AgentJob, AgentSeat, InvocationAuditRecord, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
 import { createAgentWorker, type RuntimeAdapter } from '../src/agentWorker.js';
 
 function createJob(overrides: Partial<AgentJob> = {}): AgentJob {
@@ -20,6 +20,7 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
   const messages: MessageRecord[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
+  const audits: InvocationAuditRecord[] = [];
   const acknowledgements: Array<{ consumerGroup: string; streamId: string }> = [];
   const seat =
     options.seat ??
@@ -39,6 +40,17 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
     createInvocation: vi.fn(),
     listInvocationsBySourceMessage: vi.fn(() => []),
     listInvocationsByThread: vi.fn(() => []),
+    createRound: vi.fn(),
+    createRoundSteps: vi.fn(),
+    listRoundsByThread: vi.fn(() => []),
+    listRoundSteps: vi.fn(() => []),
+    updateRoundStatus: vi.fn(),
+    updateRoundStepStatus: vi.fn(),
+    updateInvocationRecoveryMetadata: vi.fn(),
+    appendInvocationAudit: vi.fn((entry: InvocationAuditRecord) => {
+      audits.push(entry);
+    }),
+    listInvocationAudit: vi.fn((invocationId: string) => audits.filter((entry) => entry.invocationId === invocationId)),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
@@ -65,6 +77,7 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
     messages,
     repositories,
     statusUpdates,
+    audits,
     worker: createAgentWorker({
       repositories,
       eventBus,
@@ -103,6 +116,36 @@ test('dispatches a job to the adapter that matches the agent runtime binding', a
     body: 'codex final answer',
     invocationId: job.invocationId,
   });
+});
+
+test('persists runtime recovery metadata and lifecycle audit entries after adapter success', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({
+      body: 'codex final answer',
+      runtimeSessionId: 'codex-session-1',
+      resumeMetadata: { runtime: 'codex-cli', sessionId: 'codex-session-1' },
+    })),
+  };
+  const { acknowledgements, audits, repositories, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(repositories.updateInvocationRecoveryMetadata).toHaveBeenCalledWith(job.invocationId, {
+    runtimeSessionId: 'codex-session-1',
+    resumeMetadata: { runtime: 'codex-cli', sessionId: 'codex-session-1' },
+  });
+  expect(audits.map((audit) => audit.eventType)).toEqual([
+    'invocation.running',
+    'runtime.session_captured',
+    'invocation.succeeded',
+  ]);
 });
 
 test('acks a queued job without running the adapter when the invocation is already canceled', async () => {

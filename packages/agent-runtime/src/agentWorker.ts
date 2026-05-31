@@ -18,6 +18,8 @@ export interface RuntimeAdapterRunContext {
 
 export interface RuntimeAdapterRunResult {
   body: string;
+  runtimeSessionId?: string;
+  resumeMetadata?: Record<string, unknown>;
 }
 
 export interface RuntimeAdapter {
@@ -29,6 +31,22 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function appendInvocationAudit(
+  repositories: PersistenceRepositories,
+  invocationId: string,
+  eventType: string,
+  options: { reason?: string; metadata?: Record<string, unknown> } = {},
+): void {
+  repositories.appendInvocationAudit({
+    id: randomUUID(),
+    invocationId,
+    eventType,
+    occurredAt: Date.now(),
+    ...(options.reason ? { reason: options.reason } : {}),
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+  });
+}
+
 async function markAndPublishFailure(
   deps: { repositories: PersistenceRepositories; eventBus: EventBus },
   job: AgentJob,
@@ -36,6 +54,7 @@ async function markAndPublishFailure(
 ): Promise<void> {
   try {
     deps.repositories.updateInvocationStatus(job.invocationId, 'failed', error);
+    appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.failed', { reason: error });
   } catch (err) {
     console.warn(`Unable to mark invocation failed: ${job.invocationId}`, err);
   }
@@ -92,6 +111,7 @@ async function processJob(
     const abortController = new AbortController();
 
     deps.repositories.updateInvocationStatus(job.invocationId, 'running');
+    appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.running');
     await deps.eventBus.publishRoomEvent({
       type: 'invocation.running',
       roomId: job.roomId,
@@ -118,6 +138,19 @@ async function processJob(
       },
     });
 
+    if (result.runtimeSessionId || result.resumeMetadata) {
+      deps.repositories.updateInvocationRecoveryMetadata(job.invocationId, {
+        ...(result.runtimeSessionId ? { runtimeSessionId: result.runtimeSessionId } : {}),
+        ...(result.resumeMetadata ? { resumeMetadata: result.resumeMetadata } : {}),
+      });
+      appendInvocationAudit(deps.repositories, job.invocationId, 'runtime.session_captured', {
+        metadata: {
+          ...(result.runtimeSessionId ? { runtimeSessionId: result.runtimeSessionId } : {}),
+          ...(result.resumeMetadata ? { resumeMetadata: result.resumeMetadata } : {}),
+        },
+      });
+    }
+
     const message: MessageRecord = {
       id: randomUUID(),
       roomId: job.roomId,
@@ -130,6 +163,7 @@ async function processJob(
     };
     deps.repositories.appendMessage(message);
     deps.repositories.updateInvocationStatus(job.invocationId, 'succeeded');
+    appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.succeeded');
     durableSuccess = true;
     await deps.eventBus.publishRoomEvent({
       type: 'invocation.completed',

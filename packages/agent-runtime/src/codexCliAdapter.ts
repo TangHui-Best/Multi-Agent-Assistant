@@ -82,11 +82,23 @@ function textFrom(value: unknown): string | null {
   return null;
 }
 
-function normalizeJsonLine(line: string): { delta?: string; final?: string } | null {
+function sessionIdFrom(record: Record<string, unknown>): string | null {
+  if (typeof record.session_id === 'string') return record.session_id;
+  if (typeof record.sessionId === 'string') return record.sessionId;
+  const session = asRecord(record.session);
+  if (typeof session?.id === 'string') return session.id;
+  return null;
+}
+
+function normalizeJsonLine(line: string): { delta?: string; final?: string; sessionId?: string } | null {
   const parsed = JSON.parse(line) as unknown;
   const record = asRecord(parsed);
   if (!record) return null;
   const type = typeof record.type === 'string' ? record.type : '';
+  const sessionId = sessionIdFrom(record);
+  if (sessionId) {
+    return { sessionId };
+  }
 
   if (typeof record.delta === 'string') {
     return { delta: record.delta };
@@ -121,6 +133,7 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
         let stderr = '';
         let plainStdout = '';
         let finalOutput = '';
+        let runtimeSessionId = '';
         let sawJson = false;
         const pendingDeltas: Promise<void>[] = [];
 
@@ -143,6 +156,9 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
             }
             if (normalized?.final) {
               finalOutput = normalized.final;
+            }
+            if (normalized?.sessionId) {
+              runtimeSessionId = normalized.sessionId;
             }
           } catch {
             plainStdout += line;
@@ -208,7 +224,15 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
                   return;
                 }
                 const body = finalOutput || (sawJson ? '' : plainStdout.trim());
-                resolve({ body });
+                resolve({
+                  body,
+                  ...(runtimeSessionId
+                    ? {
+                        runtimeSessionId,
+                        resumeMetadata: { runtime: 'codex-cli', sessionId: runtimeSessionId },
+                      }
+                    : {}),
+                });
               });
             },
             (error: unknown) => {

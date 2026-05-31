@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
-import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
+import type { AgentJob, AgentSeat, InvocationAuditRecord, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
 import { createMockAgentWorker } from '../src/mockAgentWorker.js';
 
 beforeEach(() => {
@@ -34,6 +34,7 @@ function createHarness(
   const messages: MessageRecord[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
+  const audits: InvocationAuditRecord[] = [];
   const acknowledgements: Array<{ consumerGroup: string; streamId: string }> = [];
   const agents: AgentSeat[] = [
     { id: 'architect', displayName: 'Architect', role: 'architect', runtime: { kind: 'mock', profile: 'architect' } },
@@ -45,6 +46,20 @@ function createHarness(
     }),
     listMessages: vi.fn(() => []),
     createInvocation: vi.fn(),
+    findMessageByIdempotencyKey: vi.fn(() => null),
+    listInvocationsBySourceMessage: vi.fn(() => []),
+    listInvocationsByThread: vi.fn(() => []),
+    createRound: vi.fn(),
+    createRoundSteps: vi.fn(),
+    listRoundsByThread: vi.fn(() => []),
+    listRoundSteps: vi.fn(() => []),
+    updateRoundStatus: vi.fn(),
+    updateRoundStepStatus: vi.fn(),
+    updateInvocationRecoveryMetadata: vi.fn(),
+    appendInvocationAudit: vi.fn((entry: InvocationAuditRecord) => {
+      audits.push(entry);
+    }),
+    listInvocationAudit: vi.fn((invocationId: string) => audits.filter((entry) => entry.invocationId === invocationId)),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),

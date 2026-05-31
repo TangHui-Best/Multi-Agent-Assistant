@@ -64,6 +64,26 @@ test('spawns codex exec and normalizes JSONL deltas plus final output', async ()
   );
 });
 
+test('captures codex session id and resume metadata from JSONL output', async () => {
+  const proc = createFakeProcess();
+  const adapter = createCodexCliAdapter({ spawn: vi.fn(() => proc) });
+
+  const resultPromise = adapter.run({
+    job: createJob(),
+    seat: createSeat(),
+    emitDelta: async () => {},
+  });
+  proc.stdout.write('{"type":"session.created","session_id":"codex-session-1"}\n');
+  proc.stdout.write('{"type":"agent.final","content":"final answer"}\n');
+  proc.emit('close', 0);
+
+  await expect(resultPromise).resolves.toEqual({
+    body: 'final answer',
+    runtimeSessionId: 'codex-session-1',
+    resumeMetadata: { runtime: 'codex-cli', sessionId: 'codex-session-1' },
+  });
+});
+
 test('falls back to plain stdout as final output when output is not JSONL', async () => {
   const proc = createFakeProcess();
   const adapter = createCodexCliAdapter({ spawn: vi.fn(() => proc) });

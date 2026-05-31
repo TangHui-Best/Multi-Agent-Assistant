@@ -177,6 +177,13 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         deps.repositories.createRoundSteps(steps);
         const invocation = createInvocation({ message, agentId: firstStep.agentId, now, roundId: round.id, roundStepId: firstStep.id });
         deps.repositories.createInvocation(invocation);
+        deps.repositories.appendInvocationAudit({
+          id: randomUUID(),
+          invocationId: invocation.id,
+          eventType: 'invocation.queued',
+          occurredAt: now,
+          metadata: { roundId: round.id, roundStepId: firstStep.id },
+        });
         deps.repositories.updateRoundStepStatus(firstStep.id, 'queued', { invocationId: invocation.id });
         invocations.push(invocation);
         roundContext = { round, steps };
@@ -184,6 +191,12 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         for (const agentId of targetAgentIds) {
           const invocation = createInvocation({ message, agentId, now });
           deps.repositories.createInvocation(invocation);
+          deps.repositories.appendInvocationAudit({
+            id: randomUUID(),
+            invocationId: invocation.id,
+            eventType: 'invocation.queued',
+            occurredAt: now,
+          });
           invocations.push(invocation);
         }
       }
@@ -256,6 +269,13 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       }
       if (invocation.status !== 'canceled') {
         deps.repositories.updateInvocationStatus(invocation.id, 'canceled', reason);
+        deps.repositories.appendInvocationAudit({
+          id: randomUUID(),
+          invocationId: invocation.id,
+          eventType: 'invocation.canceled',
+          occurredAt: Date.now(),
+          ...(reason ? { reason } : {}),
+        });
       }
       const canceled = { ...invocation, status: 'canceled' as const, error: reason, updatedAt: Date.now() };
       await deps.eventBus.publishRoomEvent({

@@ -67,6 +67,17 @@ export interface InvocationRecord {
   error?: string;
   roundId?: RoundId;
   roundStepId?: RoundStepId;
+  runtimeSessionId?: string;
+  resumeMetadata?: Record<string, unknown>;
+}
+
+export interface InvocationAuditRecord {
+  id: string;
+  invocationId: InvocationId;
+  eventType: string;
+  occurredAt: number;
+  reason?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type RoundStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';

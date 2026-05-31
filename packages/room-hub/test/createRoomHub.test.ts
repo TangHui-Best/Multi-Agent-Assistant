@@ -31,6 +31,7 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
   const jobs: AgentJob[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
+  const audits: import('@multi-agent-assi/shared').InvocationAuditRecord[] = [];
   const rounds: import('@multi-agent-assi/shared').RoundRecord[] = [];
   const roundSteps: import('@multi-agent-assi/shared').RoundStepRecord[] = [];
   const actions: string[] = [];
@@ -54,6 +55,11 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     listRoundSteps: vi.fn((roundId: string) => roundSteps.filter((step) => step.roundId === roundId)),
     updateRoundStatus: vi.fn(),
     updateRoundStepStatus: vi.fn(),
+    updateInvocationRecoveryMetadata: vi.fn(),
+    appendInvocationAudit: vi.fn((entry) => {
+      audits.push(entry);
+    }),
+    listInvocationAudit: vi.fn((invocationId: string) => audits.filter((entry) => entry.invocationId === invocationId)),
     listInvocationsBySourceMessage: vi.fn((sourceMessageId: string) =>
       invocations.filter((invocation) => invocation.sourceMessageId === sourceMessageId),
     ),
@@ -90,6 +96,7 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     statusUpdates,
     rounds,
     roundSteps,
+    audits,
     roomHub: createRoomHub({ repositories, eventBus }),
   };
 }

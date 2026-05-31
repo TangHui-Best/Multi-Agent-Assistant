@@ -1,5 +1,13 @@
 import type Database from 'better-sqlite3';
-import type { AgentSeat, InvocationRecord, MessageRecord, RoundRecord, RoundStepRecord, RuntimeKind } from '@multi-agent-assi/shared';
+import type {
+  AgentSeat,
+  InvocationAuditRecord,
+  InvocationRecord,
+  MessageRecord,
+  RoundRecord,
+  RoundStepRecord,
+  RuntimeKind,
+} from '@multi-agent-assi/shared';
 
 export interface PersistenceRepositories {
   ensureDefaultState(options?: { runtimeKind?: RuntimeKind }): void;
@@ -15,6 +23,12 @@ export interface PersistenceRepositories {
   listRoundSteps(roundId: string): RoundStepRecord[];
   updateRoundStatus(id: string, status: RoundRecord['status'], error?: string): void;
   updateRoundStepStatus(id: string, status: RoundStepRecord['status'], options?: { invocationId?: string; error?: string }): void;
+  updateInvocationRecoveryMetadata(
+    id: string,
+    metadata: { runtimeSessionId?: string; resumeMetadata?: Record<string, unknown> },
+  ): void;
+  appendInvocationAudit(entry: InvocationAuditRecord): void;
+  listInvocationAudit(invocationId: string): InvocationAuditRecord[];
   updateInvocationStatus(id: string, status: InvocationRecord['status'], error?: string): void;
   getInvocation(id: string): InvocationRecord | null;
   listAgents(): AgentSeat[];
@@ -41,8 +55,19 @@ type InvocationRow = {
   error: string | null;
   round_id: string | null;
   round_step_id: string | null;
+  runtime_session_id: string | null;
+  resume_metadata_json: string | null;
   created_at: number;
   updated_at: number;
+};
+
+type InvocationAuditRow = {
+  id: string;
+  invocation_id: string;
+  event_type: string;
+  reason: string | null;
+  metadata_json: string | null;
+  occurred_at: number;
 };
 
 type RoundRow = {
@@ -96,6 +121,19 @@ function toInvocationRecord(row: InvocationRow): InvocationRecord {
     ...(row.error ? { error: row.error } : {}),
     ...(row.round_id ? { roundId: row.round_id } : {}),
     ...(row.round_step_id ? { roundStepId: row.round_step_id } : {}),
+    ...(row.runtime_session_id ? { runtimeSessionId: row.runtime_session_id } : {}),
+    ...(row.resume_metadata_json ? { resumeMetadata: JSON.parse(row.resume_metadata_json) as Record<string, unknown> } : {}),
+  };
+}
+
+function toInvocationAuditRecord(row: InvocationAuditRow): InvocationAuditRecord {
+  return {
+    id: row.id,
+    invocationId: row.invocation_id,
+    eventType: row.event_type,
+    occurredAt: row.occurred_at,
+    ...(row.reason ? { reason: row.reason } : {}),
+    ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, unknown> } : {}),
   };
 }
 
@@ -174,8 +212,11 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
 
     createInvocation(invocation) {
       db.prepare(`
-        insert into invocations (id, room_id, thread_id, source_message_id, agent_id, status, error, round_id, round_step_id, created_at, updated_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        insert into invocations (
+          id, room_id, thread_id, source_message_id, agent_id, status, error, round_id, round_step_id,
+          runtime_session_id, resume_metadata_json, created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         invocation.id,
         invocation.roomId,
@@ -186,6 +227,8 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
         invocation.error ?? null,
         invocation.roundId ?? null,
         invocation.roundStepId ?? null,
+        invocation.runtimeSessionId ?? null,
+        invocation.resumeMetadata ? JSON.stringify(invocation.resumeMetadata) : null,
         invocation.createdAt,
         invocation.updatedAt,
       );
@@ -274,6 +317,47 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
       if (result.changes === 0) {
         throw new Error(`Round step not found: ${id}`);
       }
+    },
+
+    updateInvocationRecoveryMetadata(id, metadata) {
+      const result = db
+        .prepare(`
+          update invocations
+          set runtime_session_id = coalesce(?, runtime_session_id),
+              resume_metadata_json = coalesce(?, resume_metadata_json),
+              updated_at = ?
+          where id = ?
+        `)
+        .run(
+          metadata.runtimeSessionId ?? null,
+          metadata.resumeMetadata ? JSON.stringify(metadata.resumeMetadata) : null,
+          Date.now(),
+          id,
+        );
+      if (result.changes === 0) {
+        throw new Error(`Invocation not found: ${id}`);
+      }
+    },
+
+    appendInvocationAudit(entry) {
+      db.prepare(`
+        insert into invocation_audit_logs (id, invocation_id, event_type, reason, metadata_json, occurred_at)
+        values (?, ?, ?, ?, ?, ?)
+      `).run(
+        entry.id,
+        entry.invocationId,
+        entry.eventType,
+        entry.reason ?? null,
+        entry.metadata ? JSON.stringify(entry.metadata) : null,
+        entry.occurredAt,
+      );
+    },
+
+    listInvocationAudit(invocationId) {
+      return db
+        .prepare('select * from invocation_audit_logs where invocation_id = ? order by occurred_at asc, rowid asc')
+        .all(invocationId)
+        .map((row) => toInvocationAuditRecord(row as InvocationAuditRow));
     },
 
     updateInvocationStatus(id, status, error) {

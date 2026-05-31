@@ -154,4 +154,54 @@ describe('persistence repositories', () => {
       ['step-2', 'reviewer', 'step-1'],
     ]);
   });
+
+  it('stores invocation recovery metadata and audit entries', () => {
+    const repositories = createRepositories(createDatabase(':memory:'));
+    repositories.ensureDefaultState();
+    repositories.appendMessage({
+      id: 'message-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      kind: 'user_message',
+      sender: { type: 'user', userId: 'local-user', source: 'web' },
+      body: 'Review the plan',
+      createdAt: 1,
+    });
+    repositories.createInvocation({
+      id: 'invocation-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'message-1',
+      agentId: 'architect',
+      status: 'running',
+      createdAt: 2,
+      updatedAt: 2,
+    });
+
+    repositories.updateInvocationRecoveryMetadata('invocation-1', {
+      runtimeSessionId: 'codex-session-1',
+      resumeMetadata: { command: 'codex resume codex-session-1' },
+    });
+    repositories.appendInvocationAudit({
+      id: 'audit-1',
+      invocationId: 'invocation-1',
+      eventType: 'runtime.session_captured',
+      reason: 'codex session id observed',
+      metadata: { runtimeSessionId: 'codex-session-1' },
+      occurredAt: 3,
+    });
+
+    expect(repositories.getInvocation('invocation-1')).toMatchObject({
+      runtimeSessionId: 'codex-session-1',
+      resumeMetadata: { command: 'codex resume codex-session-1' },
+    });
+    expect(repositories.listInvocationAudit('invocation-1')).toEqual([
+      expect.objectContaining({
+        id: 'audit-1',
+        eventType: 'runtime.session_captured',
+        reason: 'codex session id observed',
+        metadata: { runtimeSessionId: 'codex-session-1' },
+      }),
+    ]);
+  });
 });
