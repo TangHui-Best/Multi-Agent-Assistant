@@ -4,6 +4,7 @@ import { createDatabase, createRepositories } from '@multi-agent-assi/persistenc
 import { createRoomHub } from '@multi-agent-assi/room-hub';
 import { createServer } from './createServer.js';
 import { readDefaultRuntimeKind } from './runtimeConfig.js';
+import { recoverBeforeWorkerStart } from './startup.js';
 
 const host = '127.0.0.1';
 const port = Number.parseInt(process.env.HOST_PORT ?? '4317', 10);
@@ -23,8 +24,7 @@ const worker = createAgentWorker({
   onInvocationSucceeded: (invocationId) => roomHub.continueRoundAfterInvocation(invocationId).then(() => undefined),
   onInvocationFailed: (invocationId, error) => roomHub.settleRoundAfterInvocation(invocationId, 'failed', error),
 });
-await roomHub.recoverThreadContinuity('default-thread');
-worker.start();
+await recoverBeforeWorkerStart({ roomHub, worker, threadId: 'default-thread' });
 
 const server = await createServer({ repositories, eventBus, roomHub });
 
