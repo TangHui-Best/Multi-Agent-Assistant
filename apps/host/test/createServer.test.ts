@@ -58,6 +58,17 @@ function createHarness() {
       return { message, invocations: [invocation] };
     }),
     listMessages: vi.fn(async () => messages),
+    cancelInvocation: vi.fn(async (invocationId: string, reason?: string) => ({
+      id: invocationId,
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'canceled' as const,
+      error: reason,
+      createdAt: 1,
+      updatedAt: 2,
+    })),
   };
 
   return { eventBus, repositories, roomHub };
@@ -97,6 +108,22 @@ describe('host server', () => {
     expect(response.statusCode).toBe(200);
     expect(harness.roomHub.submitMessage).toHaveBeenCalledOnce();
     expect(response.json().invocations).toHaveLength(1);
+    await server.close();
+  });
+
+  it('cancels an invocation through Room Hub', async () => {
+    const harness = createHarness();
+    const server = await createServer(harness);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/invocations/inv-1/cancel',
+      payload: { reason: 'user requested stop' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(harness.roomHub.cancelInvocation).toHaveBeenCalledWith('inv-1', 'user requested stop');
+    expect(response.json()).toMatchObject({ id: 'inv-1', status: 'canceled' });
     await server.close();
   });
 

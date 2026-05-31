@@ -104,6 +104,59 @@ test('dispatches a job to the adapter that matches the agent runtime binding', a
   });
 });
 
+test('acks a queued job without running the adapter when the invocation is already canceled', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, repositories, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'canceled',
+    error: 'user requested stop',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(adapter.run).not.toHaveBeenCalled();
+  expect(statusUpdates).toEqual([]);
+});
+
+test('passes an abort signal to the runtime adapter', async () => {
+  const job = createJob();
+  let receivedSignal: AbortSignal | undefined;
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async ({ signal }) => {
+      receivedSignal = signal;
+      return { body: 'final' };
+    }),
+  };
+  const { acknowledgements, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  expect(receivedSignal?.aborted).toBe(false);
+});
+
 test('fails and acks only the current invocation when no adapter exists for the seat runtime', async () => {
   const job = createJob();
   const { acknowledgements, events, messages, statusUpdates, worker } = createHarness({

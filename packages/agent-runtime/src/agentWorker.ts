@@ -12,6 +12,7 @@ export interface AgentWorker {
 export interface RuntimeAdapterRunContext {
   job: AgentJob;
   seat: AgentSeat;
+  signal: AbortSignal;
   emitDelta(delta: string): Promise<void>;
 }
 
@@ -81,8 +82,14 @@ async function processJob(
 ): Promise<void> {
   let durableSuccess = false;
   try {
+    const currentInvocation = deps.repositories.getInvocation(job.invocationId);
+    if (currentInvocation?.status === 'canceled') {
+      return;
+    }
+
     const seat = findSeat(deps.repositories, job.agentId);
     const adapter = findAdapter(deps.adapters, seat.runtime.kind);
+    const abortController = new AbortController();
 
     deps.repositories.updateInvocationStatus(job.invocationId, 'running');
     await deps.eventBus.publishRoomEvent({
@@ -97,6 +104,7 @@ async function processJob(
     const result = await adapter.run({
       job,
       seat,
+      signal: abortController.signal,
       emitDelta: async (delta) => {
         await deps.eventBus.publishRoomEvent({
           type: 'agent.delta',

@@ -71,6 +71,7 @@ export type RoomEvent =
   | { type: 'invocation.running'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; occurredAt: number }
   | { type: 'agent.delta'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; delta: string; occurredAt: number }
   | { type: 'invocation.completed'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; message: MessageRecord; occurredAt: number }
+  | { type: 'invocation.canceled'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; reason?: string; occurredAt: number }
   | { type: 'invocation.failed'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; error: string; occurredAt: number };
 
 export interface AgentJob {

@@ -111,3 +111,20 @@ test('kills the process and fails on timeout', async () => {
   await rejection;
   vi.useRealTimers();
 });
+
+test('kills the process and fails when the runtime signal is aborted', async () => {
+  const proc = createFakeProcess();
+  const adapter = createCodexCliAdapter({ spawn: vi.fn(() => proc) });
+  const controller = new AbortController();
+
+  const resultPromise = adapter.run({
+    job: createJob(),
+    seat: createSeat(),
+    signal: controller.signal,
+    emitDelta: async () => {},
+  });
+  controller.abort(new Error('user requested stop'));
+
+  expect(proc.kill).toHaveBeenCalledOnce();
+  await expect(resultPromise).rejects.toThrow('Codex CLI canceled: user requested stop');
+});

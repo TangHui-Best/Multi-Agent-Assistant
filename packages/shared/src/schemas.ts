@@ -15,3 +15,7 @@ export const submitMessageSchema = z.object({
   target: targetSchema,
   idempotencyKey: z.string().min(8),
 });
+
+export const cancelInvocationSchema = z.object({
+  reason: z.string().min(1).max(2000).optional(),
+});

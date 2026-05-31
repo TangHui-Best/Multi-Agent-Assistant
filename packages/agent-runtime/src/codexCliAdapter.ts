@@ -60,6 +60,13 @@ function resolveSpawnInvocation(command: string, args: string[]): { command: str
   };
 }
 
+function abortReasonMessage(signal: AbortSignal): string {
+  const reason = signal.reason as unknown;
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'string') return reason;
+  return 'aborted';
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
@@ -107,7 +114,7 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
 
   return {
     kind: 'codex-cli',
-    run({ job, emitDelta }) {
+    run({ job, signal, emitDelta }) {
       return new Promise((resolve, reject) => {
         let settled = false;
         let stdoutBuffer = '';
@@ -121,6 +128,7 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
+          signal?.removeEventListener('abort', handleAbort);
           fn();
         };
 
@@ -159,6 +167,17 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Run
           proc.kill();
           finish(() => reject(new Error(`Codex CLI timed out after ${timeoutMs}ms`)));
         }, timeoutMs);
+
+        const handleAbort = () => {
+          proc.kill();
+          finish(() => reject(new Error(`Codex CLI canceled: ${abortReasonMessage(signal)}`)));
+        };
+
+        if (signal?.aborted) {
+          handleAbort();
+          return;
+        }
+        signal?.addEventListener('abort', handleAbort, { once: true });
 
         proc.stdout.on('data', (chunk: Buffer | string) => {
           const text = String(chunk);

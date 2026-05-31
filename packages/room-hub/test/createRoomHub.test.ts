@@ -212,3 +212,20 @@ test('same idempotency key returns the original message and invocations without 
   expect(repositories.listMessages('default-thread')).toHaveLength(1);
   expect(eventBus.jobs).toHaveLength(1);
 });
+
+test('cancelInvocation marks the target invocation canceled and publishes a cancellation event', async () => {
+  const { events, invocations, repositories, roomHub, statusUpdates } = createHarness(['architect']);
+  await roomHub.submitMessage(createInput({ mode: 'mention', agentIds: ['architect'] }));
+
+  const result = await roomHub.cancelInvocation(invocations[0].id, 'user requested stop');
+
+  expect(result).toMatchObject({ id: invocations[0].id, status: 'canceled' });
+  expect(statusUpdates).toEqual([{ id: invocations[0].id, status: 'canceled', error: 'user requested stop' }]);
+  expect(events.at(-1)).toMatchObject({
+    type: 'invocation.canceled',
+    invocationId: invocations[0].id,
+    agentId: 'architect',
+    reason: 'user requested stop',
+  });
+  expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(invocations[0].id, 'canceled', 'user requested stop');
+});

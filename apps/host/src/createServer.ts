@@ -3,7 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { RoomHub } from '@multi-agent-assi/room-hub';
-import { submitMessageSchema, type RoomEvent } from '@multi-agent-assi/shared';
+import { cancelInvocationSchema, submitMessageSchema, type RoomEvent } from '@multi-agent-assi/shared';
 
 export interface CreateServerDeps {
   repositories: PersistenceRepositories;
@@ -99,6 +99,19 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
     }
 
     return deps.roomHub.submitMessage(parsed.data);
+  });
+
+  server.post('/api/invocations/:invocationId/cancel', async (request, reply) => {
+    const params = request.params as { invocationId?: string };
+    if (!params.invocationId) {
+      return reply.status(400).send({ error: 'Missing invocation id' });
+    }
+    const parsed = cancelInvocationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid cancellation input', issues: parsed.error.issues });
+    }
+
+    return deps.roomHub.cancelInvocation(params.invocationId, parsed.data.reason);
   });
 
   server.get('/ws', { websocket: true }, (socket) => {

@@ -5,6 +5,7 @@ import type { AgentId, AgentJob, InvocationRecord, MessageRecord, SubmitMessageI
 
 export interface RoomHub {
   submitMessage(input: SubmitMessageInput): Promise<{ message: MessageRecord; invocations: InvocationRecord[] }>;
+  cancelInvocation(invocationId: string, reason?: string): Promise<InvocationRecord>;
   listMessages(threadId: string): Promise<MessageRecord[]>;
 }
 
@@ -168,6 +169,27 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       }
 
       return { message, invocations };
+    },
+
+    async cancelInvocation(invocationId, reason) {
+      const invocation = deps.repositories.getInvocation(invocationId);
+      if (!invocation) {
+        throw new Error(`Invocation not found: ${invocationId}`);
+      }
+      if (invocation.status !== 'canceled') {
+        deps.repositories.updateInvocationStatus(invocation.id, 'canceled', reason);
+      }
+      const canceled = { ...invocation, status: 'canceled' as const, error: reason, updatedAt: Date.now() };
+      await deps.eventBus.publishRoomEvent({
+        type: 'invocation.canceled',
+        roomId: invocation.roomId,
+        threadId: invocation.threadId,
+        invocationId: invocation.id,
+        agentId: invocation.agentId,
+        ...(reason ? { reason } : {}),
+        occurredAt: Date.now(),
+      });
+      return canceled;
     },
 
     async listMessages(threadId) {
