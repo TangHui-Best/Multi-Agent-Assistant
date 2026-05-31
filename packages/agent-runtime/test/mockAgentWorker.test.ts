@@ -60,6 +60,7 @@ function createHarness(
       audits.push(entry);
     }),
     listInvocationAudit: vi.fn((invocationId: string) => audits.filter((entry) => entry.invocationId === invocationId)),
+    tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
@@ -100,7 +101,7 @@ function createHarness(
 
 test('processes a job through running, delta, message, succeeded, completed, and ack', async () => {
   const job = createJob();
-  const { acknowledgements, events, messages, statusUpdates, worker } = createHarness({
+  const { acknowledgements, events, messages, repositories, statusUpdates, worker } = createHarness({
     jobs: [{ streamId: 'stream-1', job }],
   });
 
@@ -108,7 +109,8 @@ test('processes a job through running, delta, message, succeeded, completed, and
   await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'mock-agent-workers', streamId: 'stream-1' }]));
   worker.stop();
 
-  expect(statusUpdates.map((update) => update.status)).toEqual(['running', 'succeeded']);
+  expect(repositories.tryStartInvocation).toHaveBeenCalledWith(job.invocationId);
+  expect(statusUpdates.map((update) => update.status)).toEqual(['succeeded']);
   expect(events.map((event) => event.type)).toEqual(['invocation.running', 'agent.delta', 'invocation.completed']);
   expect(messages).toHaveLength(1);
   expect(messages[0]).toMatchObject({
@@ -134,7 +136,6 @@ test('pre-success failure marks failed and acks the job', async () => {
   worker.stop();
 
   expect(statusUpdates).toEqual([
-    { id: job.invocationId, status: 'running', error: undefined },
     { id: job.invocationId, status: 'failed', error: 'publish failed for agent.delta' },
   ]);
   expect(events).toEqual([
@@ -161,7 +162,6 @@ test('completed publish failure after durable success still acks without marking
 
   expect(messages).toHaveLength(1);
   expect(statusUpdates).toEqual([
-    { id: job.invocationId, status: 'running', error: undefined },
     { id: job.invocationId, status: 'succeeded', error: undefined },
   ]);
   expect(events.map((event) => event.type)).toEqual(['invocation.running', 'agent.delta']);

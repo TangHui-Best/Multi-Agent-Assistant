@@ -6,6 +6,7 @@ const AGENT_JOBS_STREAM = 'mas:agent-jobs';
 const AGENT_SLOT_LEASE_PREFIX = 'mas:agent-slot-lease:';
 const STALE_AGENT_JOB_IDLE_MS = 30_000;
 const AGENT_JOB_READ_COUNT = 10;
+const MAX_AGENT_JOB_CLAIM_PAGES = 16;
 
 type RedisStreamEntry = [streamId: string, fields: string[]];
 type RedisStreamReadResponse = Array<[stream: string, entries: RedisStreamEntry[]]>;
@@ -104,17 +105,23 @@ export function createRedisEventBus(redisUrl: string): EventBus {
       const pendingJobs = parseAgentJobReadResponse(pendingResponse);
       if (pendingJobs.length > 0) return pendingJobs;
 
-      const staleResponse = (await redis.xautoclaim(
-        AGENT_JOBS_STREAM,
-        consumerGroup,
-        consumerName,
-        STALE_AGENT_JOB_IDLE_MS,
-        '0-0',
-        'COUNT',
-        AGENT_JOB_READ_COUNT,
-      )) as RedisAutoClaimResponse;
-      const staleJobs = parseAgentJobEntries(staleResponse[1] ?? []);
-      if (staleJobs.length > 0) return staleJobs;
+      let claimCursor = '0-0';
+      for (let page = 0; page < MAX_AGENT_JOB_CLAIM_PAGES; page += 1) {
+        const staleResponse = (await redis.xautoclaim(
+          AGENT_JOBS_STREAM,
+          consumerGroup,
+          consumerName,
+          STALE_AGENT_JOB_IDLE_MS,
+          claimCursor,
+          'COUNT',
+          AGENT_JOB_READ_COUNT,
+        )) as RedisAutoClaimResponse;
+        const staleJobs = parseAgentJobEntries(staleResponse[1] ?? []);
+        if (staleJobs.length > 0) return staleJobs;
+        const nextCursor = staleResponse[0] ?? '0-0';
+        if (nextCursor === '0-0' || nextCursor === claimCursor) break;
+        claimCursor = nextCursor;
+      }
 
       const response = (await redis.xreadgroup(
         'GROUP',

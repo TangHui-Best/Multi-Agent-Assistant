@@ -24,6 +24,7 @@ function createHarness(
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
   const audits: InvocationAuditRecord[] = [];
   const acknowledgements: Array<{ consumerGroup: string; streamId: string }> = [];
+  const runtimeOrder: string[] = [];
   let roomEventHandler: ((event: RoomEvent) => void) | undefined;
   const seat =
     options.seat ??
@@ -54,6 +55,7 @@ function createHarness(
       audits.push(entry);
     }),
     listInvocationAudit: vi.fn((invocationId: string) => audits.filter((entry) => entry.invocationId === invocationId)),
+    tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
@@ -67,10 +69,13 @@ function createHarness(
     enqueueAgentJob: vi.fn(async () => {}),
     readAgentJobs: vi.fn(async () => options.jobs ?? []),
     ackAgentJob: vi.fn(async (consumerGroup: string, streamId: string) => {
+      runtimeOrder.push(`ack:${streamId}`);
       acknowledgements.push({ consumerGroup, streamId });
     }),
     acquireAgentSlotLease: vi.fn(async () => true),
-    releaseAgentSlotLease: vi.fn(async () => {}),
+    releaseAgentSlotLease: vi.fn(async (agentId: string) => {
+      runtimeOrder.push(`release:${agentId}`);
+    }),
     subscribeRoomEvents: vi.fn(async (handler) => {
       roomEventHandler = handler;
       return async () => {
@@ -86,6 +91,7 @@ function createHarness(
     events,
     messages,
     repositories,
+    runtimeOrder,
     statusUpdates,
     audits,
     publishRoomEventToWorker(event: RoomEvent) {
@@ -111,7 +117,7 @@ test('dispatches a job to the adapter that matches the agent runtime binding', a
       return { body: 'codex final answer' };
     }),
   };
-  const { acknowledgements, events, messages, statusUpdates, worker } = createHarness({
+  const { acknowledgements, events, messages, repositories, statusUpdates, worker } = createHarness({
     adapter,
     jobs: [{ streamId: 'stream-1', job }],
   });
@@ -121,7 +127,8 @@ test('dispatches a job to the adapter that matches the agent runtime binding', a
   await worker.stop();
 
   expect(adapter.run).toHaveBeenCalledWith(expect.objectContaining({ job, seat: expect.objectContaining({ id: 'architect' }) }));
-  expect(statusUpdates.map((update) => update.status)).toEqual(['running', 'succeeded']);
+  expect(repositories.tryStartInvocation).toHaveBeenCalledWith(job.invocationId);
+  expect(statusUpdates.map((update) => update.status)).toEqual(['succeeded']);
   expect(events.map((event) => event.type)).toEqual(['invocation.running', 'agent.delta', 'invocation.completed']);
   expect(events[1]).toMatchObject({ type: 'agent.delta', delta: 'codex delta' });
   expect(messages[0]).toMatchObject({
@@ -316,7 +323,7 @@ test('aborts a running adapter when a matching invocation cancellation event arr
   await worker.stop();
 
   expect(receivedSignal?.aborted).toBe(true);
-  expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(job.invocationId, 'running');
+  expect(repositories.tryStartInvocation).toHaveBeenCalledWith(job.invocationId);
   expect(repositories.updateInvocationStatus).not.toHaveBeenCalledWith(job.invocationId, 'failed', expect.anything());
 });
 
@@ -383,7 +390,6 @@ test('times out a runtime adapter through the shared worker contract', async () 
   await worker.stop();
 
   expect(statusUpdates).toEqual([
-    { id: job.invocationId, status: 'running', error: undefined },
     { id: job.invocationId, status: 'failed', error: 'Invocation timed out after 10ms' },
   ]);
   expect(events).toContainEqual(expect.objectContaining({ type: 'invocation.failed', error: 'Invocation timed out after 10ms' }));
@@ -417,7 +423,7 @@ test('releases an acquired agent slot lease after adapter success', async () => 
     kind: 'codex-cli',
     run: vi.fn(async () => ({ body: 'final' })),
   };
-  const { acknowledgements, eventBus, worker } = createHarness({
+  const { acknowledgements, eventBus, runtimeOrder, worker } = createHarness({
     adapter,
     jobs: [{ streamId: 'stream-1', job }],
   });
@@ -431,6 +437,7 @@ test('releases an acquired agent slot lease after adapter success', async () => 
     'architect',
     vi.mocked(eventBus.acquireAgentSlotLease).mock.calls[0]?.[1],
   );
+  expect(runtimeOrder).toEqual(['ack:stream-1', 'release:architect']);
 });
 
 test('releases an acquired agent slot lease after adapter failure', async () => {
@@ -441,7 +448,7 @@ test('releases an acquired agent slot lease after adapter failure', async () => 
       throw new Error('adapter failed');
     }),
   };
-  const { acknowledgements, eventBus, statusUpdates, worker } = createHarness({
+  const { acknowledgements, eventBus, runtimeOrder, statusUpdates, worker } = createHarness({
     adapter,
     jobs: [{ streamId: 'stream-1', job }],
   });
@@ -455,6 +462,66 @@ test('releases an acquired agent slot lease after adapter failure', async () => 
     'architect',
     vi.mocked(eventBus.acquireAgentSlotLease).mock.calls[0]?.[1],
   );
+  expect(runtimeOrder).toEqual(['ack:stream-1', 'release:architect']);
+});
+
+test('acks a terminal invocation without acquiring a slot lease or rerunning the adapter', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, eventBus, repositories, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'succeeded',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(eventBus.acquireAgentSlotLease).not.toHaveBeenCalled();
+  expect(adapter.run).not.toHaveBeenCalled();
+});
+
+test('acks without running when queued to running transition is rejected by persistence', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, repositories, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.tryStartInvocation).mockReturnValue(false);
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'canceled',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(adapter.run).not.toHaveBeenCalled();
+  expect(statusUpdates).toEqual([]);
 });
 
 test('serializes jobs for the same agent seat', async () => {
@@ -556,9 +623,7 @@ test('isolates one agent failure while another agent in the same batch succeeds'
   expect(messages[0]).toMatchObject({ sender: { type: 'agent', agentId: 'reviewer' }, body: 'reviewer final' });
   expect(statusUpdates).toEqual(
     expect.arrayContaining([
-      { id: 'invocation-1', status: 'running', error: undefined },
       { id: 'invocation-1', status: 'failed', error: 'architect failed' },
-      { id: 'invocation-2', status: 'running', error: undefined },
       { id: 'invocation-2', status: 'succeeded', error: undefined },
     ]),
   );

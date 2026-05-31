@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { AgentJobEnvelope } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
-import type { AgentJob, AgentSeat, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
+import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
 
 export interface AgentWorker {
   start(): void;
@@ -92,8 +92,12 @@ function findAdapter(adapters: Map<RuntimeKind, RuntimeAdapter>, kind: RuntimeKi
   return adapter;
 }
 
-function isInvocationCanceled(repositories: PersistenceRepositories, invocationId: string): boolean {
-  return repositories.getInvocation(invocationId)?.status === 'canceled';
+function isTerminalInvocationStatus(status: InvocationRecord['status'] | undefined): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+}
+
+function getInvocationStatus(repositories: PersistenceRepositories, invocationId: string): InvocationRecord['status'] | undefined {
+  return repositories.getInvocation(invocationId)?.status;
 }
 
 async function runAdapterWithTimeout(
@@ -128,12 +132,11 @@ async function processJob(
   },
   streamId: string,
   job: AgentJob,
-): Promise<void> {
+): Promise<boolean> {
   let durableSuccess = false;
   try {
-    const currentInvocation = deps.repositories.getInvocation(job.invocationId);
-    if (currentInvocation?.status === 'canceled') {
-      return;
+    if (!deps.repositories.tryStartInvocation(job.invocationId)) {
+      return isTerminalInvocationStatus(getInvocationStatus(deps.repositories, job.invocationId));
     }
 
     const seat = findSeat(deps.repositories, job.agentId);
@@ -142,7 +145,6 @@ async function processJob(
     deps.abortControllers.set(job.invocationId, abortController);
     const deadlineAt = Date.now() + deps.timeoutMs;
 
-    deps.repositories.updateInvocationStatus(job.invocationId, 'running');
     appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.running');
     await deps.eventBus.publishRoomEvent({
       type: 'invocation.running',
@@ -177,7 +179,7 @@ async function processJob(
     );
 
     if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
-      return;
+      return true;
     }
 
     if (result.runtimeSessionId || result.resumeMetadata) {
@@ -216,14 +218,17 @@ async function processJob(
       occurredAt: Date.now(),
     });
     await deps.onInvocationSucceeded?.(job.invocationId);
+    return true;
   } catch (err) {
     if (!durableSuccess) {
       if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
-        return;
+        return true;
       }
       await markAndPublishFailure(deps, job, getErrorMessage(err));
+      return true;
     } else {
       console.warn(`Agent worker completed durable output but a later event publish failed: ${streamId}`, err);
+      return true;
     }
   } finally {
     deps.abortControllers.delete(job.invocationId);
@@ -254,9 +259,12 @@ export function createAgentWorker(deps: {
   const workerId = `${consumerGroup}:${consumerName}:${randomUUID()}`;
 
   async function processJobWithSlotLease(streamId: string, job: AgentJob): Promise<boolean> {
-    if (isInvocationCanceled(deps.repositories, job.invocationId)) {
+    const initialStatus = getInvocationStatus(deps.repositories, job.invocationId);
+    if (isTerminalInvocationStatus(initialStatus)) {
+      await deps.eventBus.ackAgentJob(consumerGroup, streamId);
       return true;
     }
+    if (initialStatus === 'running') return false;
 
     const acquired = await deps.eventBus.acquireAgentSlotLease(job.agentId, workerId, slotLeaseTtlMs);
     if (!acquired) {
@@ -264,7 +272,7 @@ export function createAgentWorker(deps: {
     }
 
     try {
-      await processJob({
+      const processed = await processJob({
         repositories: deps.repositories,
         eventBus: deps.eventBus,
         adapters,
@@ -272,7 +280,10 @@ export function createAgentWorker(deps: {
         timeoutMs,
         onInvocationSucceeded: deps.onInvocationSucceeded,
       }, streamId, job);
-      return true;
+      if (processed) {
+        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+      }
+      return processed;
     } finally {
       try {
         await deps.eventBus.releaseAgentSlotLease(job.agentId, workerId);
@@ -287,7 +298,6 @@ export function createAgentWorker(deps: {
       if (stopped) return;
       const processed = await processJobWithSlotLease(streamId, job);
       if (!processed) return;
-      await deps.eventBus.ackAgentJob(consumerGroup, streamId);
     }
   }
 

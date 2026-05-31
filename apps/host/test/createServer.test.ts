@@ -43,6 +43,7 @@ function createHarness() {
     updateInvocationRecoveryMetadata: vi.fn(),
     appendInvocationAudit: vi.fn(),
     listInvocationAudit: vi.fn(() => []),
+    tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn(),
     getInvocation: vi.fn(() => null),
     listAgents: vi.fn(() => agents),

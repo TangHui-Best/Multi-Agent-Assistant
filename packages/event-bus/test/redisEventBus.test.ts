@@ -12,6 +12,7 @@ class FakeRedis extends EventEmitter {
   xreadgroupResponses: unknown[] = [];
   xautoclaimCalls: unknown[][] = [];
   xautoclaimResponse: unknown = ['0-0', []];
+  xautoclaimResponses: unknown[] = [];
   subscribeCalls = 0;
   unsubscribeCalls = 0;
   keys = new Map<string, string>();
@@ -43,6 +44,9 @@ class FakeRedis extends EventEmitter {
 
   async xautoclaim(...args: unknown[]): Promise<unknown> {
     this.xautoclaimCalls.push(args);
+    if (this.xautoclaimResponses.length > 0) {
+      return this.xautoclaimResponses.shift();
+    }
     return this.xautoclaimResponse;
   }
 
@@ -179,6 +183,34 @@ test('readAgentJobs claims stale pending jobs before reading new jobs', async ()
     '0-0',
     'COUNT',
     10,
+  ]);
+  expect(redis.xreadgroupCalls).toHaveLength(1);
+});
+
+test('readAgentJobs follows the stale pending claim cursor before reading new jobs', async () => {
+  const eventBus = createRedisEventBus('redis://localhost:6379');
+  const redis = redisInstances[0];
+  const staleJob: AgentJob = {
+    invocationId: 'invocation-stale-page-2',
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-1',
+    agentId: 'architect',
+    prompt: 'claim stale from second page',
+  };
+  redis.xreadgroupResponse = null;
+  redis.xautoclaimResponses = [
+    ['100-0', []],
+    ['0-0', [['126-0', ['job', JSON.stringify(staleJob)]]]],
+  ];
+
+  await expect(eventBus.readAgentJobs('workers', 'worker-2', 1)).resolves.toEqual([
+    { streamId: '126-0', job: staleJob },
+  ]);
+
+  expect(redis.xautoclaimCalls).toEqual([
+    ['mas:agent-jobs', 'workers', 'worker-2', 30_000, '0-0', 'COUNT', 10],
+    ['mas:agent-jobs', 'workers', 'worker-2', 30_000, '100-0', 'COUNT', 10],
   ]);
   expect(redis.xreadgroupCalls).toHaveLength(1);
 });

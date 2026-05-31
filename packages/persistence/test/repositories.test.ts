@@ -204,4 +204,43 @@ describe('persistence repositories', () => {
       }),
     ]);
   });
+
+  it('starts an invocation only from queued state', () => {
+    const repositories = createRepositories(createDatabase(':memory:'));
+    repositories.ensureDefaultState();
+    repositories.appendMessage({
+      id: 'message-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      kind: 'user_message',
+      sender: { type: 'user', userId: 'local-user', source: 'web' },
+      body: 'Review the plan',
+      createdAt: 1,
+    });
+    repositories.createInvocation({
+      id: 'invocation-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'message-1',
+      agentId: 'architect',
+      status: 'queued',
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    repositories.createInvocation({
+      id: 'invocation-2',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'message-1',
+      agentId: 'architect',
+      status: 'canceled',
+      createdAt: 3,
+      updatedAt: 3,
+    });
+
+    expect(repositories.tryStartInvocation('invocation-1')).toBe(true);
+    expect(repositories.getInvocation('invocation-1')?.status).toBe('running');
+    expect(repositories.tryStartInvocation('invocation-2')).toBe(false);
+    expect(repositories.getInvocation('invocation-2')?.status).toBe('canceled');
+  });
 });

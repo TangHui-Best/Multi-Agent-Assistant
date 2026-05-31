@@ -29,6 +29,7 @@ export interface PersistenceRepositories {
   ): void;
   appendInvocationAudit(entry: InvocationAuditRecord): void;
   listInvocationAudit(invocationId: string): InvocationAuditRecord[];
+  tryStartInvocation(id: string): boolean;
   updateInvocationStatus(id: string, status: InvocationRecord['status'], error?: string): void;
   getInvocation(id: string): InvocationRecord | null;
   listAgents(): AgentSeat[];
@@ -358,6 +359,13 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
         .prepare('select * from invocation_audit_logs where invocation_id = ? order by occurred_at asc, rowid asc')
         .all(invocationId)
         .map((row) => toInvocationAuditRecord(row as InvocationAuditRow));
+    },
+
+    tryStartInvocation(id) {
+      const result = db
+        .prepare("update invocations set status = 'running', error = null, updated_at = ? where id = ? and status = 'queued'")
+        .run(Date.now(), id);
+      return result.changes > 0;
     },
 
     updateInvocationStatus(id, status, error) {
