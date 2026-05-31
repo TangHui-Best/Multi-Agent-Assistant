@@ -183,6 +183,41 @@ function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<Agen
 }
 
 export function createRoomHub(deps: { repositories: PersistenceRepositories; eventBus: EventBus }): RoomHub {
+  async function publishRoundUpdated(input: {
+    roundId: string;
+    threadId: string;
+    status?: RoundRecord['status'];
+    error?: string;
+    stepUpdates?: Record<string, Partial<Pick<RoundStepRecord, 'status' | 'error' | 'invocationId' | 'updatedAt'>>>;
+  }): Promise<void> {
+    const round = deps.repositories.listRoundsByThread(input.threadId).find((candidate) => candidate.id === input.roundId);
+    if (!round) return;
+    const occurredAt = Date.now();
+    const stepUpdates = input.stepUpdates ?? {};
+    const steps = deps.repositories.listRoundSteps(input.roundId).map((step) => ({
+      ...step,
+      ...stepUpdates[step.id],
+      updatedAt: stepUpdates[step.id]?.updatedAt ?? step.updatedAt,
+    }));
+    try {
+      await deps.eventBus.publishRoomEvent({
+        type: 'round.updated',
+        roomId: round.roomId,
+        threadId: round.threadId,
+        round: {
+          ...round,
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.error ? { error: input.error } : {}),
+          updatedAt: occurredAt,
+        },
+        steps,
+        occurredAt,
+      });
+    } catch {
+      // Persistence remains the source of truth; clients can recover updated round state from bootstrap.
+    }
+  }
+
   async function settleRoundAfterInvocation(invocationId: string, status: 'failed' | 'canceled', reason?: string): Promise<void> {
     const invocation = deps.repositories.getInvocation(invocationId);
     if (!invocation?.roundId || !invocation.roundStepId) {
@@ -197,12 +232,16 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
 
     const terminalReason = reason ?? (status === 'failed' ? 'Invocation failed' : 'Invocation canceled');
     deps.repositories.updateRoundStepStatus(currentStep.id, status, { invocationId, error: terminalReason });
+    const stepUpdates: Record<string, Partial<Pick<RoundStepRecord, 'status' | 'error' | 'invocationId' | 'updatedAt'>>> = {
+      [currentStep.id]: { status, invocationId, error: terminalReason, updatedAt: Date.now() },
+    };
     for (const step of getDependentSteps(steps, currentStep)) {
-      deps.repositories.updateRoundStepStatus(step.id, 'canceled', {
-        error: `Blocked by ${status} ${currentStep.agentId} step`,
-      });
+      const error = `Blocked by ${status} ${currentStep.agentId} step`;
+      deps.repositories.updateRoundStepStatus(step.id, 'canceled', { error });
+      stepUpdates[step.id] = { status: 'canceled', error, updatedAt: Date.now() };
     }
     deps.repositories.updateRoundStatus(invocation.roundId, status, terminalReason);
+    await publishRoundUpdated({ roundId: invocation.roundId, threadId: invocation.threadId, status, error: terminalReason, stepUpdates });
   }
 
   return {
@@ -391,6 +430,16 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
           const error = `Reviewer gate stopped round: ${verdict ?? 'missing verdict'}`;
           deps.repositories.updateRoundStepStatus(nextStep.id, 'canceled', { error });
           deps.repositories.updateRoundStatus(completedInvocation.roundId, 'failed', error);
+          await publishRoundUpdated({
+            roundId: completedInvocation.roundId,
+            threadId: completedInvocation.threadId,
+            status: 'failed',
+            error,
+            stepUpdates: {
+              [currentStep.id]: { status: 'succeeded', invocationId: completedInvocation.id, updatedAt: Date.now() },
+              [nextStep.id]: { status: 'canceled', error, updatedAt: Date.now() },
+            },
+          });
           return null;
         }
       }

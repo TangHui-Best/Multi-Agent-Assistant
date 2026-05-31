@@ -131,6 +131,43 @@ describe('mergeRoundEvent', () => {
     expect(duplicate.rounds.map((item) => item.id)).toEqual(['round-1']);
     expect(duplicate.roundSteps.map((item) => item.id)).toEqual(['step-1']);
   });
+
+  it('updates existing rounds and steps from round.updated events', () => {
+    const initial = mergeRoundEvent(
+      { rounds: [], roundSteps: [] },
+      { type: 'round.created', roomId: 'default-room', threadId: 'default-thread', round, steps, occurredAt: 1 },
+    );
+    const updatedRound: RoundRecord = { ...round, status: 'failed', error: 'Reviewer gate stopped round', updatedAt: 3 };
+    const updatedSteps: RoundStepRecord[] = [
+      { ...steps[0], status: 'succeeded', updatedAt: 2 },
+      {
+        id: 'step-2',
+        roundId: 'round-1',
+        stepIndex: 1,
+        agentId: 'reviewer',
+        status: 'canceled',
+        error: 'Reviewer gate stopped round',
+        createdAt: 1,
+        updatedAt: 3,
+      },
+    ];
+    const event: RoomEvent = {
+      type: 'round.updated',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      round: updatedRound,
+      steps: updatedSteps,
+      occurredAt: 3,
+    };
+
+    const result = mergeRoundEvent(initial, event);
+
+    expect(result.rounds).toEqual([expect.objectContaining({ id: 'round-1', status: 'failed', error: 'Reviewer gate stopped round' })]);
+    expect(result.roundSteps.map((step) => [step.id, step.status])).toEqual([
+      ['step-1', 'succeeded'],
+      ['step-2', 'canceled'],
+    ]);
+  });
 });
 
 describe('mergeBootstrapState', () => {

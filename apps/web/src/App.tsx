@@ -129,7 +129,7 @@ export function mergeInvocationEvent(invocations: InvocationRecord[], event: Roo
 }
 
 export function mergeRoundEvent(state: RoundProjectionState, event: RoomEvent): RoundProjectionState {
-  if (event.type !== 'round.created') return state;
+  if (event.type !== 'round.created' && event.type !== 'round.updated') return state;
   return {
     rounds: upsertById(state.rounds, event.round),
     roundSteps: event.steps.reduce((steps, step) => upsertById(steps, step), state.roundSteps),

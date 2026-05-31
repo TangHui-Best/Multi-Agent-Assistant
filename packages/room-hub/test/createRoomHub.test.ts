@@ -296,7 +296,7 @@ test('design_review_execute prompts reviewer with architect output and requires 
 });
 
 test('reviewer changes requested verdict stops the round without queuing implementer', async () => {
-  const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  const { events, invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
   messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
@@ -311,6 +311,7 @@ test('reviewer changes requested verdict stops the round without queuing impleme
     error: 'Reviewer gate stopped round: changes_requested',
   });
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'Reviewer gate stopped round: changes_requested');
+  expect(events.at(-1)).toMatchObject({ type: 'round.updated', round: expect.objectContaining({ id: rounds[0].id, status: 'failed' }) });
 });
 
 test('missing reviewer verdict stops the round without queuing implementer', async () => {

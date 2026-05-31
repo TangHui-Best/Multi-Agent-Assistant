@@ -113,6 +113,7 @@ export type RoomEvent =
   | { type: 'invocation.queued'; roomId: RoomId; threadId: ThreadId; invocation: InvocationRecord; occurredAt: number }
   | { type: 'invocation.running'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; occurredAt: number }
   | { type: 'round.created'; roomId: RoomId; threadId: ThreadId; round: RoundRecord; steps: RoundStepRecord[]; occurredAt: number }
+  | { type: 'round.updated'; roomId: RoomId; threadId: ThreadId; round: RoundRecord; steps: RoundStepRecord[]; occurredAt: number }
   | { type: 'agent.delta'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; delta: string; occurredAt: number }
   | { type: 'invocation.completed'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; message: MessageRecord; occurredAt: number }
   | { type: 'invocation.canceled'; roomId: RoomId; threadId: ThreadId; invocationId: InvocationId; agentId: AgentId; reason?: string; occurredAt: number }
