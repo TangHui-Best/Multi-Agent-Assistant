@@ -90,6 +90,7 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
   server.get('/api/bootstrap', async () => ({
     agents: deps.repositories.listAgents(),
     messages: await deps.roomHub.listMessages('default-thread'),
+    invocations: deps.repositories.listInvocationsByThread('default-thread'),
   }));
 
   server.post('/api/messages', async (request, reply) => {

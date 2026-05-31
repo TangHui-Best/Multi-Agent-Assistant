@@ -22,6 +22,18 @@ function createHarness() {
     findMessageByIdempotencyKey: vi.fn(() => null),
     createInvocation: vi.fn(),
     listInvocationsBySourceMessage: vi.fn(() => []),
+    listInvocationsByThread: vi.fn(() => [
+      {
+        id: 'inv-1',
+        roomId: 'default-room',
+        threadId: 'default-thread',
+        sourceMessageId: 'msg-1',
+        agentId: 'architect',
+        status: 'queued',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]),
     updateInvocationStatus: vi.fn(),
     getInvocation: vi.fn(() => null),
     listAgents: vi.fn(() => agents),
@@ -83,7 +95,7 @@ describe('host server', () => {
     const bootstrap = await server.inject({ method: 'GET', url: '/api/bootstrap' });
 
     expect(health.json()).toEqual({ ok: true });
-    expect(bootstrap.json()).toEqual({ agents: harness.repositories.listAgents(), messages: [] });
+    expect(bootstrap.json()).toEqual({ agents: harness.repositories.listAgents(), messages: [], invocations: harness.repositories.listInvocationsByThread('default-thread') });
     await server.close();
   });
 

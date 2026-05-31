@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentSeat, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
+import type { AgentSeat, InvocationRecord, InvocationStatus, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
 import { fetchBootstrap, submitMessage } from './api.js';
 import './styles.css';
 
@@ -13,6 +13,55 @@ export function mergeRoomEvent(messages: MessageRecord[], event: RoomEvent): Mes
   return [...messages, nextMessage].sort((a, b) => a.createdAt - b.createdAt);
 }
 
+function upsertInvocation(invocations: InvocationRecord[], next: InvocationRecord): InvocationRecord[] {
+  const existingIndex = invocations.findIndex((invocation) => invocation.id === next.id);
+  if (existingIndex < 0) {
+    return [...invocations, next].sort((a, b) => a.createdAt - b.createdAt);
+  }
+  return invocations.map((invocation, index) => (index === existingIndex ? { ...invocation, ...next } : invocation));
+}
+
+function updateInvocation(
+  invocations: InvocationRecord[],
+  event: Extract<RoomEvent, { invocationId: string }>,
+  statusValue: InvocationStatus,
+  error?: string,
+): InvocationRecord[] {
+  const existing = invocations.find((invocation) => invocation.id === event.invocationId);
+  const base: InvocationRecord =
+    existing ??
+    ({
+      id: event.invocationId,
+      roomId: event.roomId,
+      threadId: event.threadId,
+      sourceMessageId: '',
+      agentId: 'agentId' in event ? event.agentId : 'unknown',
+      status: statusValue,
+      createdAt: event.occurredAt,
+      updatedAt: event.occurredAt,
+    } satisfies InvocationRecord);
+  return upsertInvocation(invocations, { ...base, status: statusValue, updatedAt: event.occurredAt, ...(error ? { error } : {}) });
+}
+
+export function mergeInvocationEvent(invocations: InvocationRecord[], event: RoomEvent): InvocationRecord[] {
+  if (event.type === 'invocation.queued') {
+    return upsertInvocation(invocations, event.invocation);
+  }
+  if (event.type === 'invocation.running') {
+    return updateInvocation(invocations, event, 'running');
+  }
+  if (event.type === 'invocation.completed') {
+    return updateInvocation(invocations, event, 'succeeded');
+  }
+  if (event.type === 'invocation.failed') {
+    return updateInvocation(invocations, event, 'failed', event.error);
+  }
+  if (event.type === 'invocation.canceled') {
+    return updateInvocation(invocations, event, 'canceled', event.reason);
+  }
+  return invocations;
+}
+
 function senderLabel(message: MessageRecord): string {
   if (message.sender.type === 'agent') return message.sender.agentId;
   if (message.sender.type === 'user') return 'you';
@@ -23,9 +72,16 @@ function seatStatus(seat: AgentSeat): string {
   return `${seat.role} · ${seat.runtime.kind}`;
 }
 
+function latestInvocationForSeat(invocations: InvocationRecord[], agentId: string): InvocationRecord | undefined {
+  return invocations
+    .filter((invocation) => invocation.agentId === agentId)
+    .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt)[0];
+}
+
 export default function App() {
   const [agents, setAgents] = useState<AgentSeat[]>([]);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [invocations, setInvocations] = useState<InvocationRecord[]>([]);
   const [body, setBody] = useState('@architect review the boundary');
   const [targetAgent, setTargetAgent] = useState(DEFAULT_TARGET);
   const [status, setStatus] = useState('Connecting');
@@ -35,6 +91,7 @@ export default function App() {
       .then((state) => {
         setAgents(state.agents);
         setMessages(state.messages);
+        setInvocations(state.invocations ?? []);
         setStatus('Ready');
       })
       .catch((err: unknown) => setStatus(err instanceof Error ? err.message : String(err)));
@@ -45,7 +102,9 @@ export default function App() {
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
     socket.addEventListener('open', () => setStatus('Live'));
     socket.addEventListener('message', (event) => {
-      setMessages((current) => mergeRoomEvent(current, JSON.parse(event.data as string) as RoomEvent));
+      const roomEvent = JSON.parse(event.data as string) as RoomEvent;
+      setMessages((current) => mergeRoomEvent(current, roomEvent));
+      setInvocations((current) => mergeInvocationEvent(current, roomEvent));
     });
     socket.addEventListener('close', () => setStatus('Disconnected'));
     socket.addEventListener('error', () => setStatus('Connection issue'));
@@ -89,6 +148,9 @@ export default function App() {
             >
               <span>{agent.displayName}</span>
               <small>{seatStatus(agent)}</small>
+              <span className={`invocation-pill ${latestInvocationForSeat(invocations, agent.id)?.status ?? 'idle'}`}>
+                {latestInvocationForSeat(invocations, agent.id)?.status ?? 'idle'}
+              </span>
             </button>
           ))}
         </div>

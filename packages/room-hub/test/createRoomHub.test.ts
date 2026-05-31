@@ -45,6 +45,7 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     listInvocationsBySourceMessage: vi.fn((sourceMessageId: string) =>
       invocations.filter((invocation) => invocation.sourceMessageId === sourceMessageId),
     ),
+    listInvocationsByThread: vi.fn((threadId: string) => invocations.filter((invocation) => invocation.threadId === threadId)),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),

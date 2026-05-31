@@ -1,8 +1,9 @@
-import type { AgentSeat, MessageRecord, SubmitMessageInput } from '@multi-agent-assi/shared';
+import type { AgentSeat, InvocationRecord, MessageRecord, SubmitMessageInput } from '@multi-agent-assi/shared';
 
 export interface BootstrapState {
   agents: AgentSeat[];
   messages: MessageRecord[];
+  invocations: InvocationRecord[];
 }
 
 export async function fetchBootstrap(): Promise<BootstrapState> {

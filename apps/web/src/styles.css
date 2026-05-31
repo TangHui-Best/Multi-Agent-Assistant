@@ -90,6 +90,40 @@ h2 {
   color: oklch(48% 0.02 255);
 }
 
+.invocation-pill {
+  align-self: flex-start;
+  min-width: 74px;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border: 1px solid oklch(78% 0.012 255);
+  border-radius: 999px;
+  background: oklch(96% 0.006 255);
+  color: oklch(38% 0.02 255);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.invocation-pill.running {
+  border-color: oklch(75% 0.08 210);
+  background: oklch(94% 0.035 210);
+  color: oklch(35% 0.075 220);
+}
+
+.invocation-pill.succeeded {
+  border-color: oklch(78% 0.07 150);
+  background: oklch(94% 0.04 150);
+  color: oklch(34% 0.07 150);
+}
+
+.invocation-pill.failed,
+.invocation-pill.canceled {
+  border-color: oklch(78% 0.075 25);
+  background: oklch(95% 0.035 25);
+  color: oklch(36% 0.08 25);
+}
+
 .thread {
   display: grid;
   grid-template-rows: auto 1fr auto;

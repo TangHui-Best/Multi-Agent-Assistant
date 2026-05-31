@@ -8,6 +8,7 @@ export interface PersistenceRepositories {
   listMessages(threadId: string): MessageRecord[];
   createInvocation(invocation: InvocationRecord): void;
   listInvocationsBySourceMessage(sourceMessageId: string): InvocationRecord[];
+  listInvocationsByThread(threadId: string): InvocationRecord[];
   updateInvocationStatus(id: string, status: InvocationRecord['status'], error?: string): void;
   getInvocation(id: string): InvocationRecord | null;
   listAgents(): AgentSeat[];
@@ -128,6 +129,13 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
       return db
         .prepare('select * from invocations where source_message_id = ? order by created_at asc, rowid asc')
         .all(sourceMessageId)
+        .map((row) => toInvocationRecord(row as InvocationRow));
+    },
+
+    listInvocationsByThread(threadId) {
+      return db
+        .prepare('select * from invocations where thread_id = ? order by created_at asc, rowid asc')
+        .all(threadId)
         .map((row) => toInvocationRecord(row as InvocationRow));
     },
 

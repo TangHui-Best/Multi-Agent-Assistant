@@ -38,6 +38,7 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
     listMessages: vi.fn(() => []),
     createInvocation: vi.fn(),
     listInvocationsBySourceMessage: vi.fn(() => []),
+    listInvocationsByThread: vi.fn(() => []),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
