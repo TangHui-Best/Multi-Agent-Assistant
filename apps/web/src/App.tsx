@@ -89,9 +89,9 @@ export function mergeRoundEvent(state: RoundProjectionState, event: RoomEvent): 
 }
 
 export function deriveRoundStepStatus(step: RoundStepRecord, invocations: InvocationRecord[]): RoundStepStatus {
-  const linkedInvocation = invocations.find((invocation) =>
-    step.invocationId ? invocation.id === step.invocationId : invocation.roundStepId === step.id,
-  );
+  const linkedInvocation =
+    (step.invocationId ? invocations.find((invocation) => invocation.id === step.invocationId) : undefined) ??
+    invocations.find((invocation) => invocation.roundStepId === step.id);
   return linkedInvocation?.status ?? step.status;
 }
 

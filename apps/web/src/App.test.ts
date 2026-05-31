@@ -172,4 +172,30 @@ describe('deriveRoundStepStatus', () => {
 
     expect(deriveRoundStepStatus(step, [invocation])).toBe('running');
   });
+
+  it('falls back to invocation roundStepId when step invocationId is not in the projection', () => {
+    const step: RoundStepRecord = {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'queued',
+      invocationId: 'missing-invocation',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const invocation: InvocationRecord = {
+      id: 'inv-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'succeeded',
+      roundStepId: 'step-1',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    expect(deriveRoundStepStatus(step, [invocation])).toBe('succeeded');
+  });
 });
