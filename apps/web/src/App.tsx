@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
   AgentSeat,
+  InvocationAuditRecord,
   InvocationRecord,
   InvocationStatus,
   MessageRecord,
@@ -9,7 +10,7 @@ import type {
   RoundStepRecord,
   RoundStepStatus,
 } from '@multi-agent-assi/shared';
-import { fetchBootstrap, submitMessage } from './api.js';
+import { fetchBootstrap, fetchInvocationAudit, submitMessage } from './api.js';
 import './styles.css';
 
 const DEFAULT_TARGET = 'architect';
@@ -88,11 +89,21 @@ export function mergeRoundEvent(state: RoundProjectionState, event: RoomEvent): 
   };
 }
 
-export function deriveRoundStepStatus(step: RoundStepRecord, invocations: InvocationRecord[]): RoundStepStatus {
-  const linkedInvocation =
+export function findRoundStepInvocation(step: RoundStepRecord, invocations: InvocationRecord[]): InvocationRecord | undefined {
+  return (
     (step.invocationId ? invocations.find((invocation) => invocation.id === step.invocationId) : undefined) ??
-    invocations.find((invocation) => invocation.roundStepId === step.id);
+    invocations.find((invocation) => invocation.roundStepId === step.id)
+  );
+}
+
+export function deriveRoundStepStatus(step: RoundStepRecord, invocations: InvocationRecord[]): RoundStepStatus {
+  const linkedInvocation = findRoundStepInvocation(step, invocations);
   return linkedInvocation?.status ?? step.status;
+}
+
+export function formatRecoveryMetadata(metadata: Record<string, unknown> | undefined): string {
+  if (!metadata) return 'No resume metadata captured';
+  return JSON.stringify(metadata, null, 2);
 }
 
 function senderLabel(message: MessageRecord): string {
@@ -115,6 +126,10 @@ export default function App() {
   const [agents, setAgents] = useState<AgentSeat[]>([]);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [invocations, setInvocations] = useState<InvocationRecord[]>([]);
+  const [roundProjection, setRoundProjection] = useState<RoundProjectionState>({ rounds: [], roundSteps: [] });
+  const [selectedInvocationId, setSelectedInvocationId] = useState<string | null>(null);
+  const [auditEntries, setAuditEntries] = useState<InvocationAuditRecord[]>([]);
+  const [auditStatus, setAuditStatus] = useState('Select an invocation');
   const [body, setBody] = useState('@architect review the boundary');
   const [targetAgent, setTargetAgent] = useState(DEFAULT_TARGET);
   const [status, setStatus] = useState('Connecting');
@@ -125,6 +140,7 @@ export default function App() {
         setAgents(state.agents);
         setMessages(state.messages);
         setInvocations(state.invocations ?? []);
+        setRoundProjection({ rounds: state.rounds ?? [], roundSteps: state.roundSteps ?? [] });
         setStatus('Ready');
       })
       .catch((err: unknown) => setStatus(err instanceof Error ? err.message : String(err)));
@@ -138,6 +154,7 @@ export default function App() {
       const roomEvent = JSON.parse(event.data as string) as RoomEvent;
       setMessages((current) => mergeRoomEvent(current, roomEvent));
       setInvocations((current) => mergeInvocationEvent(current, roomEvent));
+      setRoundProjection((current) => mergeRoundEvent(current, roomEvent));
     });
     socket.addEventListener('close', () => setStatus('Disconnected'));
     socket.addEventListener('error', () => setStatus('Connection issue'));
@@ -145,6 +162,33 @@ export default function App() {
   }, []);
 
   const visibleMessages = useMemo(() => messages, [messages]);
+  const selectedInvocation = selectedInvocationId ? invocations.find((invocation) => invocation.id === selectedInvocationId) : undefined;
+
+  useEffect(() => {
+    if (!selectedInvocationId) {
+      setAuditEntries([]);
+      setAuditStatus('Select an invocation');
+      return;
+    }
+
+    let canceled = false;
+    setAuditStatus('Loading audit');
+    void fetchInvocationAudit(selectedInvocationId)
+      .then((entries) => {
+        if (canceled) return;
+        setAuditEntries(entries);
+        setAuditStatus(entries.length === 0 ? 'No audit entries yet' : 'Audit loaded');
+      })
+      .catch((err: unknown) => {
+        if (canceled) return;
+        setAuditEntries([]);
+        setAuditStatus(err instanceof Error ? err.message : String(err));
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [selectedInvocationId]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -198,20 +242,104 @@ export default function App() {
           <span className="status">{status}</span>
         </header>
 
-        <div className="timeline">
-          {visibleMessages.length === 0 ? (
-            <div className="empty-state">Start with a focused task or review request.</div>
-          ) : (
-            visibleMessages.map((message) => (
-              <article className={`message ${message.sender.type}`} key={message.id}>
-                <div className="message-meta">
-                  <strong>{senderLabel(message)}</strong>
-                  <span>{message.kind.replace('_', ' ')}</span>
+        <div className="workbench">
+          <div className="main-column">
+            <section className="round-panel" aria-label="Round progress">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Rounds</p>
+                  <h3>design review</h3>
                 </div>
-                <p>{message.body}</p>
-              </article>
-            ))
-          )}
+              </div>
+              {roundProjection.rounds.length === 0 ? (
+                <p className="subtle">No controlled rounds yet.</p>
+              ) : (
+                roundProjection.rounds.map((round) => (
+                  <article className="round-card" key={round.id}>
+                    <div className="round-title">
+                      <strong>{round.workflow.replaceAll('_', ' ')}</strong>
+                      <span className={`invocation-pill ${round.status}`}>{round.status}</span>
+                    </div>
+                    <div className="step-list">
+                      {roundProjection.roundSteps
+                        .filter((step) => step.roundId === round.id)
+                        .sort((a, b) => a.stepIndex - b.stepIndex)
+                        .map((step) => {
+                          const linkedInvocation = findRoundStepInvocation(step, invocations);
+                          const visibleStatus = deriveRoundStepStatus(step, invocations);
+                          return (
+                            <button
+                              className="round-step"
+                              disabled={!linkedInvocation}
+                              key={step.id}
+                              onClick={() => setSelectedInvocationId(linkedInvocation?.id ?? null)}
+                              type="button"
+                            >
+                              <span>
+                                {step.stepIndex + 1}. {step.agentId}
+                              </span>
+                              <small>{linkedInvocation?.id ?? 'waiting'}</small>
+                              <span className={`invocation-pill ${visibleStatus}`}>{visibleStatus}</span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </article>
+                ))
+              )}
+            </section>
+
+            <div className="timeline">
+              {visibleMessages.length === 0 ? (
+                <div className="empty-state">Start with a focused task or review request.</div>
+              ) : (
+                visibleMessages.map((message) => (
+                  <article className={`message ${message.sender.type}`} key={message.id}>
+                    <div className="message-meta">
+                      <strong>{senderLabel(message)}</strong>
+                      <span>{message.kind.replace('_', ' ')}</span>
+                    </div>
+                    <p>{message.body}</p>
+                  </article>
+                ))
+              )}
+            </div>
+          </div>
+
+          <aside className="recovery-panel" aria-label="Recovery detail">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Recovery</p>
+                <h3>{selectedInvocation?.agentId ?? 'No invocation selected'}</h3>
+              </div>
+            </div>
+            {selectedInvocation ? (
+              <div className="recovery-detail">
+                <dl>
+                  <dt>Invocation</dt>
+                  <dd>{selectedInvocation.id}</dd>
+                  <dt>Status</dt>
+                  <dd>{selectedInvocation.status}</dd>
+                  <dt>Source message</dt>
+                  <dd>{selectedInvocation.sourceMessageId}</dd>
+                  <dt>Runtime session</dt>
+                  <dd>{selectedInvocation.runtimeSessionId ?? 'No session captured'}</dd>
+                </dl>
+                <pre>{formatRecoveryMetadata(selectedInvocation.resumeMetadata)}</pre>
+                <div className="audit-list">
+                  <strong>{auditStatus}</strong>
+                  {auditEntries.map((entry) => (
+                    <article className="audit-entry" key={entry.id}>
+                      <span>{entry.eventType}</span>
+                      <small>{entry.reason ?? entry.invocationId}</small>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="subtle">Select a round step to inspect recovery facts.</p>
+            )}
+          </aside>
         </div>
 
         <form className="composer" onSubmit={onSubmit}>

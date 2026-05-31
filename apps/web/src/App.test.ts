@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { InvocationRecord, MessageRecord, RoomEvent, RoundRecord, RoundStepRecord } from '@multi-agent-assi/shared';
-import { deriveRoundStepStatus, mergeInvocationEvent, mergeRoomEvent, mergeRoundEvent } from './App.js';
+import {
+  deriveRoundStepStatus,
+  findRoundStepInvocation,
+  formatRecoveryMetadata,
+  mergeInvocationEvent,
+  mergeRoomEvent,
+  mergeRoundEvent,
+} from './App.js';
 
 const message: MessageRecord = {
   id: 'msg-1',
@@ -197,5 +204,42 @@ describe('deriveRoundStepStatus', () => {
     };
 
     expect(deriveRoundStepStatus(step, [invocation])).toBe('succeeded');
+  });
+});
+
+describe('findRoundStepInvocation', () => {
+  it('finds linked invocations through either step invocationId or invocation roundStepId', () => {
+    const step: RoundStepRecord = {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'queued',
+      invocationId: 'missing-invocation',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const invocation: InvocationRecord = {
+      id: 'inv-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'running',
+      roundStepId: 'step-1',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    expect(findRoundStepInvocation(step, [invocation])?.id).toBe('inv-1');
+  });
+});
+
+describe('formatRecoveryMetadata', () => {
+  it('prints stable JSON for resume metadata and a clear empty state', () => {
+    expect(formatRecoveryMetadata({ runtime: 'codex-cli', sessionId: 'codex-session-1' })).toBe(
+      '{\n  "runtime": "codex-cli",\n  "sessionId": "codex-session-1"\n}',
+    );
+    expect(formatRecoveryMetadata(undefined)).toBe('No resume metadata captured');
   });
 });
