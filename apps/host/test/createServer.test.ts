@@ -2,7 +2,16 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
-import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent } from '@multi-agent-assi/shared';
+import type {
+  AgentJob,
+  AgentSeat,
+  InvocationAuditRecord,
+  InvocationRecord,
+  MessageRecord,
+  RoomEvent,
+  RoundRecord,
+  RoundStepRecord,
+} from '@multi-agent-assi/shared';
 import { attachRoomEventSocket, createServer } from '../src/createServer.js';
 
 interface WebSocketTestServer {
@@ -14,6 +23,39 @@ function createHarness() {
   const messages: MessageRecord[] = [];
   const agents: AgentSeat[] = [
     { id: 'architect', displayName: 'Architect', role: 'architect', runtime: { kind: 'mock', profile: 'architect' } },
+  ];
+  const rounds: RoundRecord[] = [
+    {
+      id: 'round-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      workflow: 'design_review_execute',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ];
+  const roundSteps: RoundStepRecord[] = [
+    {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'queued',
+      invocationId: 'inv-1',
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ];
+  const audits: InvocationAuditRecord[] = [
+    {
+      id: 'audit-1',
+      invocationId: 'inv-1',
+      eventType: 'invocation.queued',
+      occurredAt: 1,
+      metadata: { roundId: 'round-1', roundStepId: 'step-1' },
+    },
   ];
   const repositories: PersistenceRepositories = {
     ensureDefaultState: vi.fn(),
@@ -36,16 +78,28 @@ function createHarness() {
     ]),
     createRound: vi.fn(),
     createRoundSteps: vi.fn(),
-    listRoundsByThread: vi.fn(() => []),
-    listRoundSteps: vi.fn(() => []),
+    listRoundsByThread: vi.fn(() => rounds),
+    listRoundSteps: vi.fn((roundId: string) => roundSteps.filter((step) => step.roundId === roundId)),
     updateRoundStatus: vi.fn(),
     updateRoundStepStatus: vi.fn(),
     updateInvocationRecoveryMetadata: vi.fn(),
     appendInvocationAudit: vi.fn(),
-    listInvocationAudit: vi.fn(() => []),
+    listInvocationAudit: vi.fn((invocationId: string) => audits.filter((audit) => audit.invocationId === invocationId)),
     tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn(),
-    getInvocation: vi.fn(() => null),
+    getInvocation: vi.fn((invocationId: string) => {
+      if (invocationId !== 'inv-1') return null;
+      return {
+        id: 'inv-1',
+        roomId: 'default-room',
+        threadId: 'default-thread',
+        sourceMessageId: 'msg-1',
+        agentId: 'architect',
+        status: 'queued',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    }),
     listAgents: vi.fn(() => agents),
   };
   const eventBus: EventBus = {
@@ -96,7 +150,7 @@ function createHarness() {
     })),
   };
 
-  return { eventBus, repositories, roomHub };
+  return { eventBus, repositories, roomHub, rounds, roundSteps };
 }
 
 describe('host server', () => {
@@ -108,7 +162,13 @@ describe('host server', () => {
     const bootstrap = await server.inject({ method: 'GET', url: '/api/bootstrap' });
 
     expect(health.json()).toEqual({ ok: true });
-    expect(bootstrap.json()).toEqual({ agents: harness.repositories.listAgents(), messages: [], invocations: harness.repositories.listInvocationsByThread('default-thread') });
+    expect(bootstrap.json()).toEqual({
+      agents: harness.repositories.listAgents(),
+      messages: [],
+      invocations: harness.repositories.listInvocationsByThread('default-thread'),
+      rounds: harness.rounds,
+      roundSteps: harness.roundSteps,
+    });
     await server.close();
   });
 
@@ -149,6 +209,28 @@ describe('host server', () => {
     expect(response.statusCode).toBe(200);
     expect(harness.roomHub.cancelInvocation).toHaveBeenCalledWith('inv-1', 'user requested stop');
     expect(response.json()).toMatchObject({ id: 'inv-1', status: 'canceled' });
+    await server.close();
+  });
+
+  it('serves invocation audit records from repositories', async () => {
+    const harness = createHarness();
+    const server = await createServer(harness);
+
+    const response = await server.inject({ method: 'GET', url: '/api/invocations/inv-1/audit' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(harness.repositories.listInvocationAudit('inv-1'));
+    await server.close();
+  });
+
+  it('returns 404 for audit of an unknown invocation', async () => {
+    const harness = createHarness();
+    const server = await createServer(harness);
+
+    const response = await server.inject({ method: 'GET', url: '/api/invocations/missing/audit' });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'Invocation not found' });
     await server.close();
   });
 

@@ -87,11 +87,17 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
 
   server.get('/api/health', async () => ({ ok: true }));
 
-  server.get('/api/bootstrap', async () => ({
-    agents: deps.repositories.listAgents(),
-    messages: await deps.roomHub.listMessages('default-thread'),
-    invocations: deps.repositories.listInvocationsByThread('default-thread'),
-  }));
+  server.get('/api/bootstrap', async () => {
+    const threadId = 'default-thread';
+    const rounds = deps.repositories.listRoundsByThread(threadId);
+    return {
+      agents: deps.repositories.listAgents(),
+      messages: await deps.roomHub.listMessages(threadId),
+      invocations: deps.repositories.listInvocationsByThread(threadId),
+      rounds,
+      roundSteps: rounds.flatMap((round) => deps.repositories.listRoundSteps(round.id)),
+    };
+  });
 
   server.post('/api/messages', async (request, reply) => {
     const parsed = submitMessageSchema.safeParse(request.body);
@@ -113,6 +119,18 @@ export async function createServer(deps: CreateServerDeps): Promise<FastifyInsta
     }
 
     return deps.roomHub.cancelInvocation(params.invocationId, parsed.data.reason);
+  });
+
+  server.get('/api/invocations/:invocationId/audit', async (request, reply) => {
+    const params = request.params as { invocationId?: string };
+    if (!params.invocationId) {
+      return reply.status(400).send({ error: 'Missing invocation id' });
+    }
+    const invocation = deps.repositories.getInvocation(params.invocationId);
+    if (!invocation) {
+      return reply.status(404).send({ error: 'Invocation not found' });
+    }
+    return deps.repositories.listInvocationAudit(params.invocationId);
   });
 
   server.get('/ws', { websocket: true }, (socket) => {
