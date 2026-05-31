@@ -23,6 +23,7 @@ const worker = createAgentWorker({
   onInvocationSucceeded: (invocationId) => roomHub.continueRoundAfterInvocation(invocationId).then(() => undefined),
   onInvocationFailed: (invocationId, error) => roomHub.settleRoundAfterInvocation(invocationId, 'failed', error),
 });
+await roomHub.recoverThreadContinuity('default-thread');
 worker.start();
 
 const server = await createServer({ repositories, eventBus, roomHub });
