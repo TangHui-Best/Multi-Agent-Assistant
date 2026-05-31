@@ -147,4 +147,29 @@ describe('deriveRoundStepStatus', () => {
 
     expect(deriveRoundStepStatus(step, [invocation])).toBe('failed');
   });
+
+  it('uses invocation roundStepId when live steps do not have invocationId yet', () => {
+    const step: RoundStepRecord = {
+      id: 'step-1',
+      roundId: 'round-1',
+      stepIndex: 0,
+      agentId: 'architect',
+      status: 'pending',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const invocation: InvocationRecord = {
+      id: 'inv-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'running',
+      roundStepId: 'step-1',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+
+    expect(deriveRoundStepStatus(step, [invocation])).toBe('running');
+  });
 });
