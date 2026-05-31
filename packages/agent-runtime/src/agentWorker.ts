@@ -129,6 +129,7 @@ async function processJob(
     abortControllers: Map<string, AbortController>;
     timeoutMs: number;
     onInvocationSucceeded?: (invocationId: string) => Promise<void>;
+    onInvocationFailed?: (invocationId: string, error: string) => Promise<void>;
   },
   streamId: string,
   job: AgentJob,
@@ -224,7 +225,13 @@ async function processJob(
       if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
         return true;
       }
-      await markAndPublishFailure(deps, job, getErrorMessage(err));
+      const error = getErrorMessage(err);
+      await markAndPublishFailure(deps, job, error);
+      try {
+        await deps.onInvocationFailed?.(job.invocationId, error);
+      } catch (callbackErr) {
+        console.warn(`Unable to settle failed invocation: ${job.invocationId}`, callbackErr);
+      }
       return true;
     } else {
       console.warn(`Agent worker completed durable output but a later event publish failed: ${streamId}`, err);
@@ -244,6 +251,7 @@ export function createAgentWorker(deps: {
   timeoutMs?: number;
   slotLeaseTtlMs?: number;
   onInvocationSucceeded?: (invocationId: string) => Promise<void>;
+  onInvocationFailed?: (invocationId: string, error: string) => Promise<void>;
 }): AgentWorker {
   let stopped = true;
   let timer: NodeJS.Timeout | null = null;
@@ -277,7 +285,13 @@ export function createAgentWorker(deps: {
         return true;
       }
       if (leasedStatus === 'running') {
-        await markAndPublishFailure(deps, job, 'Stale running invocation recovered after slot lease expired');
+        const error = 'Stale running invocation recovered after slot lease expired';
+        await markAndPublishFailure(deps, job, error);
+        try {
+          await deps.onInvocationFailed?.(job.invocationId, error);
+        } catch (callbackErr) {
+          console.warn(`Unable to settle failed invocation: ${job.invocationId}`, callbackErr);
+        }
         await deps.eventBus.ackAgentJob(consumerGroup, streamId);
         return true;
       }
@@ -288,6 +302,7 @@ export function createAgentWorker(deps: {
         abortControllers,
         timeoutMs,
         onInvocationSucceeded: deps.onInvocationSucceeded,
+        onInvocationFailed: deps.onInvocationFailed,
       }, streamId, job);
       if (processed) {
         await deps.eventBus.ackAgentJob(consumerGroup, streamId);

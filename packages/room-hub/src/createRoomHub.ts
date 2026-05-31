@@ -14,6 +14,7 @@ export interface RoomHub {
   submitMessage(input: SubmitMessageInput): Promise<{ message: MessageRecord; invocations: InvocationRecord[] }>;
   cancelInvocation(invocationId: string, reason?: string): Promise<InvocationRecord>;
   continueRoundAfterInvocation(invocationId: string): Promise<InvocationRecord | null>;
+  settleRoundAfterInvocation(invocationId: string, status: 'failed' | 'canceled', reason?: string): Promise<void>;
   listMessages(threadId: string): Promise<MessageRecord[]>;
 }
 
@@ -140,6 +141,10 @@ function findStepInvocation(invocations: InvocationRecord[], stepId: string): In
   return invocations.find((invocation) => invocation.roundStepId === stepId);
 }
 
+function getDependentSteps(steps: RoundStepRecord[], currentStep: RoundStepRecord): RoundStepRecord[] {
+  return steps.filter((step) => step.stepIndex > currentStep.stepIndex && step.status !== 'failed' && step.status !== 'canceled');
+}
+
 function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<AgentId>, now: number): {
   round: RoundRecord;
   steps: RoundStepRecord[];
@@ -178,6 +183,28 @@ function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<Agen
 }
 
 export function createRoomHub(deps: { repositories: PersistenceRepositories; eventBus: EventBus }): RoomHub {
+  async function settleRoundAfterInvocation(invocationId: string, status: 'failed' | 'canceled', reason?: string): Promise<void> {
+    const invocation = deps.repositories.getInvocation(invocationId);
+    if (!invocation?.roundId || !invocation.roundStepId) {
+      return;
+    }
+
+    const steps = deps.repositories.listRoundSteps(invocation.roundId);
+    const currentStep = steps.find((step) => step.id === invocation.roundStepId);
+    if (!currentStep) {
+      throw new Error(`Round step not found for invocation: ${invocationId}`);
+    }
+
+    const terminalReason = reason ?? (status === 'failed' ? 'Invocation failed' : 'Invocation canceled');
+    deps.repositories.updateRoundStepStatus(currentStep.id, status, { invocationId, error: terminalReason });
+    for (const step of getDependentSteps(steps, currentStep)) {
+      deps.repositories.updateRoundStepStatus(step.id, 'canceled', {
+        error: `Blocked by ${status} ${currentStep.agentId} step`,
+      });
+    }
+    deps.repositories.updateRoundStatus(invocation.roundId, status, terminalReason);
+  }
+
   return {
     async submitMessage(input) {
       const now = Date.now();
@@ -311,6 +338,7 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         });
       }
       const canceled = { ...invocation, status: 'canceled' as const, error: reason, updatedAt: Date.now() };
+      await settleRoundAfterInvocation(invocation.id, 'canceled', reason);
       await deps.eventBus.publishRoomEvent({
         type: 'invocation.canceled',
         roomId: invocation.roomId,
@@ -322,6 +350,8 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       });
       return canceled;
     },
+
+    settleRoundAfterInvocation,
 
     async continueRoundAfterInvocation(invocationId) {
       const completedInvocation = deps.repositories.getInvocation(invocationId);

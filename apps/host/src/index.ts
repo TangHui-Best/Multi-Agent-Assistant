@@ -21,6 +21,7 @@ const worker = createAgentWorker({
   eventBus,
   adapters: [createMockRuntimeAdapter(), createCodexCliAdapter()],
   onInvocationSucceeded: (invocationId) => roomHub.continueRoundAfterInvocation(invocationId).then(() => undefined),
+  onInvocationFailed: (invocationId, error) => roomHub.settleRoundAfterInvocation(invocationId, 'failed', error),
 });
 worker.start();
 

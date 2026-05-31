@@ -330,6 +330,43 @@ test('missing reviewer verdict stops the round without queuing implementer', asy
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'Reviewer gate stopped round: missing verdict');
 });
 
+test('settleRoundAfterInvocation fails current step, cancels dependents, and fails the round', async () => {
+  const { invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+
+  await roomHub.settleRoundAfterInvocation(reviewerInvocation!.id, 'failed', 'reviewer runtime failed');
+
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'failed', {
+    invocationId: reviewerInvocation!.id,
+    error: 'reviewer runtime failed',
+  });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[2].id, 'canceled', {
+    error: 'Blocked by failed reviewer step',
+  });
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'reviewer runtime failed');
+});
+
+test('cancelInvocation settles a round-linked invocation and cancels dependent steps', async () => {
+  const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+
+  await roomHub.cancelInvocation(invocations[0].id, 'user requested stop');
+
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[0].id, 'canceled', {
+    invocationId: invocations[0].id,
+    error: 'user requested stop',
+  });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'canceled', {
+    error: 'Blocked by canceled architect step',
+  });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[2].id, 'canceled', {
+    error: 'Blocked by canceled architect step',
+  });
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'canceled', 'user requested stop');
+});
+
 test('same idempotency key returns the original message and invocations without duplicate jobs', async () => {
   const repositories = createRepositories(createDatabase(':memory:'));
   repositories.ensureDefaultState();

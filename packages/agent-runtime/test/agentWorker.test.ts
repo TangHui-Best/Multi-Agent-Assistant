@@ -17,7 +17,13 @@ function createJob(overrides: Partial<AgentJob> = {}): AgentJob {
 }
 
 function createHarness(
-  options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jobs?: Array<{ streamId: string; job: AgentJob }>; timeoutMs?: number } = {},
+  options: {
+    seat?: AgentSeat;
+    adapter?: RuntimeAdapter;
+    jobs?: Array<{ streamId: string; job: AgentJob }>;
+    timeoutMs?: number;
+    onInvocationFailed?: (invocationId: string, error: string) => Promise<void>;
+  } = {},
 ) {
   const messages: MessageRecord[] = [];
   const events: RoomEvent[] = [];
@@ -104,6 +110,7 @@ function createHarness(
       consumerGroup: 'runtime-workers',
       pollIntervalMs: 60_000,
       timeoutMs: options.timeoutMs,
+      onInvocationFailed: options.onInvocationFailed,
     }),
   };
 }
@@ -463,6 +470,28 @@ test('releases an acquired agent slot lease after adapter failure', async () => 
     vi.mocked(eventBus.acquireAgentSlotLease).mock.calls[0]?.[1],
   );
   expect(runtimeOrder).toEqual(['ack:stream-1', 'release:architect']);
+});
+
+test('notifies the host when an invocation fails durably', async () => {
+  const job = createJob();
+  const onInvocationFailed = vi.fn(async () => {});
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => {
+      throw new Error('adapter failed');
+    }),
+  };
+  const { acknowledgements, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+    onInvocationFailed,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(onInvocationFailed).toHaveBeenCalledWith(job.invocationId, 'adapter failed');
 });
 
 test('acks a terminal invocation without acquiring a slot lease or rerunning the adapter', async () => {
