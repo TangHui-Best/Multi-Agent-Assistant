@@ -192,6 +192,59 @@ test('acks a queued job without running the adapter when the invocation is alrea
   expect(statusUpdates).toEqual([]);
 });
 
+test('does not run or ack an active invocation when the agent slot lease is unavailable', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, eventBus, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(eventBus.acquireAgentSlotLease).mockResolvedValue(false);
+
+  worker.start();
+  await vi.waitFor(() =>
+    expect(eventBus.acquireAgentSlotLease).toHaveBeenCalledWith('architect', expect.any(String), expect.any(Number)),
+  );
+  await worker.stop();
+
+  expect(adapter.run).not.toHaveBeenCalled();
+  expect(acknowledgements).toEqual([]);
+  expect(eventBus.releaseAgentSlotLease).not.toHaveBeenCalled();
+});
+
+test('acks an already canceled queued job without requiring an agent slot lease', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, eventBus, repositories, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'canceled',
+    error: 'user requested stop',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(eventBus.acquireAgentSlotLease).not.toHaveBeenCalled();
+  expect(adapter.run).not.toHaveBeenCalled();
+});
+
 test('passes an abort signal to the runtime adapter', async () => {
   const job = createJob();
   let receivedSignal: AbortSignal | undefined;
@@ -356,6 +409,52 @@ test('fails and acks only the current invocation when no adapter exists for the 
       error: 'No runtime adapter registered for codex-cli',
     }),
   ]);
+});
+
+test('releases an acquired agent slot lease after adapter success', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'final' })),
+  };
+  const { acknowledgements, eventBus, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(eventBus.acquireAgentSlotLease).toHaveBeenCalledWith('architect', expect.any(String), expect.any(Number));
+  expect(eventBus.releaseAgentSlotLease).toHaveBeenCalledWith(
+    'architect',
+    vi.mocked(eventBus.acquireAgentSlotLease).mock.calls[0]?.[1],
+  );
+});
+
+test('releases an acquired agent slot lease after adapter failure', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => {
+      throw new Error('adapter failed');
+    }),
+  };
+  const { acknowledgements, eventBus, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(statusUpdates).toContainEqual({ id: job.invocationId, status: 'failed', error: 'adapter failed' });
+  expect(eventBus.releaseAgentSlotLease).toHaveBeenCalledWith(
+    'architect',
+    vi.mocked(eventBus.acquireAgentSlotLease).mock.calls[0]?.[1],
+  );
 });
 
 test('serializes jobs for the same agent seat', async () => {

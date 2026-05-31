@@ -92,6 +92,10 @@ function findAdapter(adapters: Map<RuntimeKind, RuntimeAdapter>, kind: RuntimeKi
   return adapter;
 }
 
+function isInvocationCanceled(repositories: PersistenceRepositories, invocationId: string): boolean {
+  return repositories.getInvocation(invocationId)?.status === 'canceled';
+}
+
 async function runAdapterWithTimeout(
   adapter: RuntimeAdapter,
   context: RuntimeAdapterRunContext,
@@ -233,6 +237,7 @@ export function createAgentWorker(deps: {
   consumerGroup?: string;
   pollIntervalMs?: number;
   timeoutMs?: number;
+  slotLeaseTtlMs?: number;
   onInvocationSucceeded?: (invocationId: string) => Promise<void>;
 }): AgentWorker {
   let stopped = true;
@@ -245,10 +250,20 @@ export function createAgentWorker(deps: {
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.kind, adapter]));
   const abortControllers = new Map<string, AbortController>();
   const timeoutMs = deps.timeoutMs ?? 300_000;
+  const slotLeaseTtlMs = deps.slotLeaseTtlMs ?? timeoutMs + 30_000;
+  const workerId = `${consumerGroup}:${consumerName}:${randomUUID()}`;
 
-  async function processJobGroup(group: AgentJobEnvelope[]): Promise<void> {
-    for (const { streamId, job } of group) {
-      if (stopped) return;
+  async function processJobWithSlotLease(streamId: string, job: AgentJob): Promise<boolean> {
+    if (isInvocationCanceled(deps.repositories, job.invocationId)) {
+      return true;
+    }
+
+    const acquired = await deps.eventBus.acquireAgentSlotLease(job.agentId, workerId, slotLeaseTtlMs);
+    if (!acquired) {
+      return false;
+    }
+
+    try {
       await processJob({
         repositories: deps.repositories,
         eventBus: deps.eventBus,
@@ -257,6 +272,21 @@ export function createAgentWorker(deps: {
         timeoutMs,
         onInvocationSucceeded: deps.onInvocationSucceeded,
       }, streamId, job);
+      return true;
+    } finally {
+      try {
+        await deps.eventBus.releaseAgentSlotLease(job.agentId, workerId);
+      } catch (err) {
+        console.warn(`Unable to release agent slot lease for ${job.agentId}`, err);
+      }
+    }
+  }
+
+  async function processJobGroup(group: AgentJobEnvelope[]): Promise<void> {
+    for (const { streamId, job } of group) {
+      if (stopped) return;
+      const processed = await processJobWithSlotLease(streamId, job);
+      if (!processed) return;
       await deps.eventBus.ackAgentJob(consumerGroup, streamId);
     }
   }
