@@ -26,6 +26,7 @@ Phase 2/3 已经证明 Codex Adapter 可以通过 Room Hub -> Event Bus -> Agent
 - Cancellation API 由 Host 暴露、Room Hub 处理、Persistence 记录，并通过 Event Bus 通知 Agent Runtime；Web Console 只能调用 API 和展示状态，不拥有取消状态。
 - Timeout 是 Runtime Adapter contract 的一部分。Agent Runtime 给 adapter 传入 deadline/abort signal，adapter 负责终止本 runtime 进程；Persistence 记录 `failed` 状态和 audit reason。
 - Slot lease 的长期分布式形态属于 Redis-backed runtime coordination；当前 worker 可以先保留 in-process serialization，但接口必须能替换为 Redis lease，不能把 slot 所有权放进 Web 或 SQLite busy lock。
+- Redis-backed slot lease contract 由 Event Bus 暴露为 `acquireAgentSlotLease` / `releaseAgentSlotLease`，使用 Redis key 的 owner + TTL 语义；在没有 pending-claim/requeue 机制前，Agent Runtime 继续使用已验证的 in-process per-agent serialization，避免因为拿不到 lease 而丢失 stream job。
 - `design_review_execute` 是 Room Hub/Orchestration 能力，而不是前端脚本。它必须创建 persisted round，并按 architect -> reviewer -> implementer 形成可追踪 step chain。
 - Codex session id 与 resume metadata 是 invocation 的恢复元数据，存入 SQLite；Codex Adapter 只负责捕获和上报，不成为事实源。
 - Invocation audit log 记录生命周期事件、触发原因和恢复所需 metadata；它不是普通 room message，也不替代用户可见消息。

@@ -9,6 +9,7 @@ class FakeRedis extends EventEmitter {
   xreadgroupResponse: unknown = null;
   subscribeCalls = 0;
   unsubscribeCalls = 0;
+  keys = new Map<string, string>();
 
   constructor(public readonly redisUrl: string) {
     super();
@@ -32,6 +33,22 @@ class FakeRedis extends EventEmitter {
   }
 
   async xack(): Promise<void> {}
+
+  async set(key: string, value: string, ttlMode: string, _ttlMs: number, mode: string): Promise<'OK' | null> {
+    if (ttlMode !== 'PX' || mode !== 'NX') throw new Error(`Unsupported fake set mode: ${ttlMode} ${mode}`);
+    if (this.keys.has(key)) return null;
+    this.keys.set(key, value);
+    return 'OK';
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.keys.get(key) ?? null;
+  }
+
+  async del(key: string): Promise<number> {
+    const existed = this.keys.delete(key);
+    return existed ? 1 : 0;
+  }
 
   async subscribe(): Promise<void> {
     this.subscribeCalls += 1;
@@ -110,4 +127,15 @@ test('one room event unsubscribe leaves other local subscribers active', async (
   await unsubscribeSecond();
 
   expect(subscriber.unsubscribeCalls).toBe(1);
+});
+
+test('agent slot leases are exclusive until released by the owner', async () => {
+  const eventBus = createRedisEventBus('redis://localhost:6379');
+
+  await expect(eventBus.acquireAgentSlotLease('architect', 'worker-1', 30_000)).resolves.toBe(true);
+  await expect(eventBus.acquireAgentSlotLease('architect', 'worker-2', 30_000)).resolves.toBe(false);
+  await eventBus.releaseAgentSlotLease('architect', 'worker-2');
+  await expect(eventBus.acquireAgentSlotLease('architect', 'worker-2', 30_000)).resolves.toBe(false);
+  await eventBus.releaseAgentSlotLease('architect', 'worker-1');
+  await expect(eventBus.acquireAgentSlotLease('architect', 'worker-2', 30_000)).resolves.toBe(true);
 });

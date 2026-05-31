@@ -81,6 +81,8 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     }),
     readAgentJobs: vi.fn(async () => []),
     ackAgentJob: vi.fn(async () => {}),
+    acquireAgentSlotLease: vi.fn(async () => true),
+    releaseAgentSlotLease: vi.fn(async () => {}),
     subscribeRoomEvents: vi.fn(async () => async () => {}),
     close: vi.fn(async () => {}),
   };
@@ -235,6 +237,8 @@ test('same idempotency key returns the original message and invocations without 
     }),
     readAgentJobs: vi.fn(async () => []),
     ackAgentJob: vi.fn(async () => {}),
+    acquireAgentSlotLease: vi.fn(async () => true),
+    releaseAgentSlotLease: vi.fn(async () => {}),
     subscribeRoomEvents: vi.fn(async () => async () => {}),
     close: vi.fn(async () => {}),
   };

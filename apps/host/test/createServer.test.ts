@@ -52,6 +52,8 @@ function createHarness() {
     enqueueAgentJob: vi.fn(async () => {}),
     readAgentJobs: vi.fn(async () => []),
     ackAgentJob: vi.fn(async () => {}),
+    acquireAgentSlotLease: vi.fn(async () => true),
+    releaseAgentSlotLease: vi.fn(async () => {}),
     subscribeRoomEvents: vi.fn(async () => async () => {}),
     close: vi.fn(async () => {}),
   };
@@ -156,6 +158,8 @@ describe('host server', () => {
       enqueueAgentJob: vi.fn(async () => {}),
       readAgentJobs: vi.fn(async () => []),
       ackAgentJob: vi.fn(async () => {}),
+      acquireAgentSlotLease: vi.fn(async () => true),
+      releaseAgentSlotLease: vi.fn(async () => {}),
       subscribeRoomEvents: vi.fn(
         () =>
           new Promise((resolve) => {

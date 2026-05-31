@@ -3,6 +3,7 @@ import type { AgentJob, RoomEvent } from '@multi-agent-assi/shared';
 
 const ROOM_EVENTS_STREAM = 'mas:room-events';
 const AGENT_JOBS_STREAM = 'mas:agent-jobs';
+const AGENT_SLOT_LEASE_PREFIX = 'mas:agent-slot-lease:';
 
 type RedisStreamEntry = [streamId: string, fields: string[]];
 type RedisStreamReadResponse = Array<[stream: string, entries: RedisStreamEntry[]]>;
@@ -20,6 +21,8 @@ export interface EventBus {
   enqueueAgentJob(job: AgentJob): Promise<void>;
   readAgentJobs(consumerGroup: string, consumerName: string, blockMs: number): Promise<AgentJobEnvelope[]>;
   ackAgentJob(consumerGroup: string, streamId: string): Promise<void>;
+  acquireAgentSlotLease(agentId: string, ownerId: string, ttlMs: number): Promise<boolean>;
+  releaseAgentSlotLease(agentId: string, ownerId: string): Promise<void>;
   subscribeRoomEvents(onEvent: (event: RoomEvent) => void): Promise<() => Promise<void>>;
   close(): Promise<void>;
 }
@@ -97,6 +100,19 @@ export function createRedisEventBus(redisUrl: string): EventBus {
 
     async ackAgentJob(consumerGroup, streamId) {
       await redis.xack(AGENT_JOBS_STREAM, consumerGroup, streamId);
+    },
+
+    async acquireAgentSlotLease(agentId, ownerId, ttlMs) {
+      const result = await redis.set(`${AGENT_SLOT_LEASE_PREFIX}${agentId}`, ownerId, 'PX', ttlMs, 'NX');
+      return result === 'OK';
+    },
+
+    async releaseAgentSlotLease(agentId, ownerId) {
+      const key = `${AGENT_SLOT_LEASE_PREFIX}${agentId}`;
+      const currentOwner = await redis.get(key);
+      if (currentOwner === ownerId) {
+        await redis.del(key);
+      }
     },
 
     async subscribeRoomEvents(onEvent) {

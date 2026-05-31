@@ -81,6 +81,8 @@ function createHarness(
     ackAgentJob: vi.fn(async (consumerGroup: string, streamId: string) => {
       acknowledgements.push({ consumerGroup, streamId });
     }),
+    acquireAgentSlotLease: vi.fn(async () => true),
+    releaseAgentSlotLease: vi.fn(async () => {}),
     subscribeRoomEvents: vi.fn(async () => async () => {}),
     close: vi.fn(async () => {}),
   };
