@@ -4,9 +4,12 @@ import type { AgentJob, RoomEvent } from '@multi-agent-assi/shared';
 const ROOM_EVENTS_STREAM = 'mas:room-events';
 const AGENT_JOBS_STREAM = 'mas:agent-jobs';
 const AGENT_SLOT_LEASE_PREFIX = 'mas:agent-slot-lease:';
+const STALE_AGENT_JOB_IDLE_MS = 30_000;
+const AGENT_JOB_READ_COUNT = 10;
 
 type RedisStreamEntry = [streamId: string, fields: string[]];
 type RedisStreamReadResponse = Array<[stream: string, entries: RedisStreamEntry[]]>;
+type RedisAutoClaimResponse = [nextStart: string, entries: RedisStreamEntry[], deleted?: string[]];
 type RoomEventHandler = (event: RoomEvent) => void;
 
 const ROOM_EVENTS_PUBSUB_CHANNEL = 'mas:room-events:pubsub';
@@ -56,6 +59,26 @@ export function createRedisEventBus(redisUrl: string): EventBus {
     }
   }
 
+  function parseAgentJobEntries(entries: RedisStreamEntry[]): AgentJobEnvelope[] {
+    const jobs: AgentJobEnvelope[] = [];
+    for (const [streamId, fields] of entries) {
+      const jobFieldIndex = fields.findIndex((value) => value === 'job');
+      if (jobFieldIndex >= 0) {
+        try {
+          jobs.push({ streamId, job: JSON.parse(fields[jobFieldIndex + 1] ?? '{}') as AgentJob });
+        } catch (err) {
+          throw new Error(`Invalid agent job payload in Redis stream entry ${streamId}`, { cause: err });
+        }
+      }
+    }
+    return jobs;
+  }
+
+  function parseAgentJobReadResponse(response: RedisStreamReadResponse | null): AgentJobEnvelope[] {
+    if (!response) return [];
+    return response.flatMap(([, entries]) => parseAgentJobEntries(entries));
+  }
+
   return {
     async publishRoomEvent(event) {
       await redis.xadd(ROOM_EVENTS_STREAM, '*', 'event', JSON.stringify(event));
@@ -68,34 +91,44 @@ export function createRedisEventBus(redisUrl: string): EventBus {
 
     async readAgentJobs(consumerGroup, consumerName, blockMs) {
       await ensureGroup(AGENT_JOBS_STREAM, consumerGroup);
+      const pendingResponse = (await redis.xreadgroup(
+        'GROUP',
+        consumerGroup,
+        consumerName,
+        'COUNT',
+        AGENT_JOB_READ_COUNT,
+        'STREAMS',
+        AGENT_JOBS_STREAM,
+        '0',
+      )) as RedisStreamReadResponse | null;
+      const pendingJobs = parseAgentJobReadResponse(pendingResponse);
+      if (pendingJobs.length > 0) return pendingJobs;
+
+      const staleResponse = (await redis.xautoclaim(
+        AGENT_JOBS_STREAM,
+        consumerGroup,
+        consumerName,
+        STALE_AGENT_JOB_IDLE_MS,
+        '0-0',
+        'COUNT',
+        AGENT_JOB_READ_COUNT,
+      )) as RedisAutoClaimResponse;
+      const staleJobs = parseAgentJobEntries(staleResponse[1] ?? []);
+      if (staleJobs.length > 0) return staleJobs;
+
       const response = (await redis.xreadgroup(
         'GROUP',
         consumerGroup,
         consumerName,
         'COUNT',
-        10,
+        AGENT_JOB_READ_COUNT,
         'BLOCK',
         blockMs,
         'STREAMS',
         AGENT_JOBS_STREAM,
         '>',
       )) as RedisStreamReadResponse | null;
-      if (!response) return [];
-      const jobs: AgentJobEnvelope[] = [];
-      for (const [, entries] of response) {
-        for (const [streamId, fields] of entries) {
-          const fieldValues = fields;
-          const jobFieldIndex = fieldValues.findIndex((value) => value === 'job');
-          if (jobFieldIndex >= 0) {
-            try {
-              jobs.push({ streamId, job: JSON.parse(fieldValues[jobFieldIndex + 1] ?? '{}') as AgentJob });
-            } catch (err) {
-              throw new Error(`Invalid agent job payload in Redis stream entry ${streamId}`, { cause: err });
-            }
-          }
-        }
-      }
-      return jobs;
+      return parseAgentJobReadResponse(response);
     },
 
     async ackAgentJob(consumerGroup, streamId) {

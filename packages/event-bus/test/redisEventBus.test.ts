@@ -6,8 +6,12 @@ const redisInstances: FakeRedis[] = [];
 
 class FakeRedis extends EventEmitter {
   xgroupCalls: unknown[][] = [];
+  xreadgroupCalls: unknown[][] = [];
   evalCalls: unknown[][] = [];
   xreadgroupResponse: unknown = null;
+  xreadgroupResponses: unknown[] = [];
+  xautoclaimCalls: unknown[][] = [];
+  xautoclaimResponse: unknown = ['0-0', []];
   subscribeCalls = 0;
   unsubscribeCalls = 0;
   keys = new Map<string, string>();
@@ -29,8 +33,17 @@ class FakeRedis extends EventEmitter {
     }
   }
 
-  async xreadgroup(): Promise<unknown> {
+  async xreadgroup(...args: unknown[]): Promise<unknown> {
+    this.xreadgroupCalls.push(args);
+    if (this.xreadgroupResponses.length > 0) {
+      return this.xreadgroupResponses.shift();
+    }
     return this.xreadgroupResponse;
+  }
+
+  async xautoclaim(...args: unknown[]): Promise<unknown> {
+    this.xautoclaimCalls.push(args);
+    return this.xautoclaimResponse;
   }
 
   async xack(): Promise<void> {}
@@ -105,6 +118,69 @@ test('readAgentJobs creates consumer group from the beginning of the job stream'
   await eventBus.readAgentJobs('workers', 'worker-1', 1);
 
   expect(redis.xgroupCalls).toContainEqual(['CREATE', 'mas:agent-jobs', 'workers', '0', 'MKSTREAM']);
+});
+
+test('readAgentJobs replays current consumer pending jobs before reading new jobs', async () => {
+  const eventBus = createRedisEventBus('redis://localhost:6379');
+  const redis = redisInstances[0];
+  const pendingJob: AgentJob = {
+    invocationId: 'invocation-pending',
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-1',
+    agentId: 'architect',
+    prompt: 'retry pending',
+  };
+  const newJob: AgentJob = {
+    invocationId: 'invocation-new',
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-2',
+    agentId: 'reviewer',
+    prompt: 'new job',
+  };
+  redis.xreadgroupResponses = [
+    [['mas:agent-jobs', [['123-0', ['job', JSON.stringify(pendingJob)]]]]],
+    [['mas:agent-jobs', [['124-0', ['job', JSON.stringify(newJob)]]]]],
+  ];
+
+  await expect(eventBus.readAgentJobs('workers', 'worker-1', 1)).resolves.toEqual([
+    { streamId: '123-0', job: pendingJob },
+  ]);
+
+  expect(redis.xreadgroupCalls).toHaveLength(1);
+  expect(redis.xreadgroupCalls[0]).toContain('0');
+  expect(redis.xreadgroupCalls[0]).not.toContain('>');
+});
+
+test('readAgentJobs claims stale pending jobs before reading new jobs', async () => {
+  const eventBus = createRedisEventBus('redis://localhost:6379');
+  const redis = redisInstances[0];
+  const staleJob: AgentJob = {
+    invocationId: 'invocation-stale',
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-1',
+    agentId: 'architect',
+    prompt: 'claim stale',
+  };
+  redis.xreadgroupResponse = null;
+  redis.xautoclaimResponse = ['0-0', [['125-0', ['job', JSON.stringify(staleJob)]]]];
+
+  await expect(eventBus.readAgentJobs('workers', 'worker-2', 1)).resolves.toEqual([
+    { streamId: '125-0', job: staleJob },
+  ]);
+
+  expect(redis.xautoclaimCalls).toContainEqual([
+    'mas:agent-jobs',
+    'workers',
+    'worker-2',
+    30_000,
+    '0-0',
+    'COUNT',
+    10,
+  ]);
+  expect(redis.xreadgroupCalls).toHaveLength(1);
 });
 
 test('one room event unsubscribe leaves other local subscribers active', async () => {
