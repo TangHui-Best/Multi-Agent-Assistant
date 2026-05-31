@@ -10,7 +10,7 @@ import type {
   RoundStepRecord,
   RoundStepStatus,
 } from '@multi-agent-assi/shared';
-import { fetchBootstrap, fetchInvocationAudit, submitMessage } from './api.js';
+import { fetchBootstrap, fetchInvocationAudit, submitMessage, type BootstrapState } from './api.js';
 import './styles.css';
 
 const DEFAULT_TARGET = 'architect';
@@ -28,12 +28,59 @@ export interface RoundProjectionState {
   roundSteps: RoundStepRecord[];
 }
 
+export interface RoomProjectionState {
+  messages: MessageRecord[];
+  invocations: InvocationRecord[];
+  roundProjection: RoundProjectionState;
+}
+
 function upsertById<T extends { id: string; createdAt: number }>(items: T[], next: T): T[] {
   const existingIndex = items.findIndex((item) => item.id === next.id);
   if (existingIndex < 0) {
     return [...items, next].sort((a, b) => a.createdAt - b.createdAt);
   }
   return items.map((item, index) => (index === existingIndex ? { ...item, ...next } : item));
+}
+
+function recordTimestamp(record: { createdAt: number; updatedAt?: number }): number {
+  return record.updatedAt ?? record.createdAt;
+}
+
+function upsertNewestById<T extends { id: string; createdAt: number; updatedAt?: number }>(items: T[], next: T): T[] {
+  const existing = items.find((item) => item.id === next.id);
+  const newer = existing && recordTimestamp(existing) > recordTimestamp(next) ? existing : next;
+  return upsertById(items, newer);
+}
+
+function mergeInvocationProjection(existing: InvocationRecord | undefined, next: InvocationRecord): InvocationRecord {
+  if (!existing) return next;
+  const newer = recordTimestamp(existing) > recordTimestamp(next) ? existing : next;
+  const older = newer === existing ? next : existing;
+  return {
+    ...older,
+    ...newer,
+    sourceMessageId: newer.sourceMessageId || older.sourceMessageId,
+    ...(newer.roundId ?? older.roundId ? { roundId: newer.roundId ?? older.roundId } : {}),
+    ...(newer.roundStepId ?? older.roundStepId ? { roundStepId: newer.roundStepId ?? older.roundStepId } : {}),
+    ...(newer.runtimeSessionId ?? older.runtimeSessionId ? { runtimeSessionId: newer.runtimeSessionId ?? older.runtimeSessionId } : {}),
+    ...(newer.resumeMetadata ?? older.resumeMetadata ? { resumeMetadata: newer.resumeMetadata ?? older.resumeMetadata } : {}),
+  };
+}
+
+function upsertInvocationProjection(invocations: InvocationRecord[], next: InvocationRecord): InvocationRecord[] {
+  const existing = invocations.find((invocation) => invocation.id === next.id);
+  return upsertById(invocations, mergeInvocationProjection(existing, next));
+}
+
+export function mergeBootstrapState(current: RoomProjectionState, bootstrap: BootstrapState): RoomProjectionState {
+  return {
+    messages: bootstrap.messages.reduce((messages, message) => upsertNewestById(messages, message), current.messages),
+    invocations: bootstrap.invocations.reduce((invocations, invocation) => upsertInvocationProjection(invocations, invocation), current.invocations),
+    roundProjection: {
+      rounds: bootstrap.rounds.reduce((rounds, round) => upsertNewestById(rounds, round), current.roundProjection.rounds),
+      roundSteps: bootstrap.roundSteps.reduce((steps, step) => upsertNewestById(steps, step), current.roundProjection.roundSteps),
+    },
+  };
 }
 
 function upsertInvocation(invocations: InvocationRecord[], next: InvocationRecord): InvocationRecord[] {
@@ -106,6 +153,14 @@ export function formatRecoveryMetadata(metadata: Record<string, unknown> | undef
   return JSON.stringify(metadata, null, 2);
 }
 
+export function createAuditLoadingState(): { auditEntries: InvocationAuditRecord[]; auditStatus: string } {
+  return { auditEntries: [], auditStatus: 'Loading audit' };
+}
+
+export function auditRefreshKey(invocation: InvocationRecord | undefined): string {
+  return invocation ? `${invocation.id}:${invocation.updatedAt}` : '';
+}
+
 function senderLabel(message: MessageRecord): string {
   if (message.sender.type === 'agent') return message.sender.agentId;
   if (message.sender.type === 'user') return 'you';
@@ -137,10 +192,11 @@ export default function App() {
   useEffect(() => {
     void fetchBootstrap()
       .then((state) => {
+        const emptyRoundProjection = { rounds: [], roundSteps: [] };
         setAgents(state.agents);
-        setMessages(state.messages);
-        setInvocations(state.invocations ?? []);
-        setRoundProjection({ rounds: state.rounds ?? [], roundSteps: state.roundSteps ?? [] });
+        setMessages((current) => mergeBootstrapState({ messages: current, invocations: [], roundProjection: emptyRoundProjection }, state).messages);
+        setInvocations((current) => mergeBootstrapState({ messages: [], invocations: current, roundProjection: emptyRoundProjection }, state).invocations);
+        setRoundProjection((current) => mergeBootstrapState({ messages: [], invocations: [], roundProjection: current }, state).roundProjection);
         setStatus('Ready');
       })
       .catch((err: unknown) => setStatus(err instanceof Error ? err.message : String(err)));
@@ -163,6 +219,7 @@ export default function App() {
 
   const visibleMessages = useMemo(() => messages, [messages]);
   const selectedInvocation = selectedInvocationId ? invocations.find((invocation) => invocation.id === selectedInvocationId) : undefined;
+  const selectedAuditRefreshKey = auditRefreshKey(selectedInvocation);
 
   useEffect(() => {
     if (!selectedInvocationId) {
@@ -172,7 +229,9 @@ export default function App() {
     }
 
     let canceled = false;
-    setAuditStatus('Loading audit');
+    const loadingState = createAuditLoadingState();
+    setAuditEntries(loadingState.auditEntries);
+    setAuditStatus(loadingState.auditStatus);
     void fetchInvocationAudit(selectedInvocationId)
       .then((entries) => {
         if (canceled) return;
@@ -188,7 +247,7 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [selectedInvocationId]);
+  }, [selectedInvocationId, selectedAuditRefreshKey]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -218,6 +277,7 @@ export default function App() {
         <div className="seat-list">
           {agents.map((agent) => (
             <button
+              aria-pressed={agent.id === targetAgent}
               className={agent.id === targetAgent ? 'seat selected' : 'seat'}
               key={agent.id}
               onClick={() => setTargetAgent(agent.id)}
@@ -269,7 +329,8 @@ export default function App() {
                           const visibleStatus = deriveRoundStepStatus(step, invocations);
                           return (
                             <button
-                              className="round-step"
+                              aria-pressed={selectedInvocationId === linkedInvocation?.id}
+                              className={selectedInvocationId === linkedInvocation?.id ? 'round-step selected' : 'round-step'}
                               disabled={!linkedInvocation}
                               key={step.id}
                               onClick={() => setSelectedInvocationId(linkedInvocation?.id ?? null)}

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { InvocationRecord, MessageRecord, RoomEvent, RoundRecord, RoundStepRecord } from '@multi-agent-assi/shared';
+import type { BootstrapState } from './api.js';
 import {
+  auditRefreshKey,
+  createAuditLoadingState,
   deriveRoundStepStatus,
   findRoundStepInvocation,
   formatRecoveryMetadata,
+  mergeBootstrapState,
   mergeInvocationEvent,
   mergeRoomEvent,
   mergeRoundEvent,
+  type RoomProjectionState,
 } from './App.js';
 
 const message: MessageRecord = {
@@ -128,6 +133,132 @@ describe('mergeRoundEvent', () => {
   });
 });
 
+describe('mergeBootstrapState', () => {
+  it('preserves live projection records that are newer than the bootstrap snapshot', () => {
+    const current: RoomProjectionState = {
+      messages: [{ ...message, id: 'live-message', createdAt: 4 }],
+      invocations: [
+        {
+          id: 'inv-1',
+          roomId: 'default-room',
+          threadId: 'default-thread',
+          sourceMessageId: 'msg-1',
+          agentId: 'architect',
+          status: 'running',
+          createdAt: 1,
+          updatedAt: 5,
+        },
+      ],
+      roundProjection: {
+        rounds: [
+          {
+            id: 'round-1',
+            roomId: 'default-room',
+            threadId: 'default-thread',
+            sourceMessageId: 'msg-1',
+            workflow: 'design_review_execute',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 5,
+          },
+        ],
+        roundSteps: [],
+      },
+    };
+    const bootstrap: BootstrapState = {
+      agents: [],
+      messages: [message],
+      invocations: [
+        {
+          id: 'inv-1',
+          roomId: 'default-room',
+          threadId: 'default-thread',
+          sourceMessageId: 'msg-1',
+          agentId: 'architect',
+          status: 'queued',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      rounds: [
+        {
+          id: 'round-1',
+          roomId: 'default-room',
+          threadId: 'default-thread',
+          sourceMessageId: 'msg-1',
+          workflow: 'design_review_execute',
+          status: 'running',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      roundSteps: [],
+    };
+
+    const merged = mergeBootstrapState(current, bootstrap);
+
+    expect(merged.messages.map((item) => item.id)).toEqual(['msg-1', 'live-message']);
+    expect(merged.invocations[0]).toEqual(expect.objectContaining({ id: 'inv-1', status: 'running', updatedAt: 5 }));
+    expect(merged.roundProjection.rounds[0]).toEqual(expect.objectContaining({ id: 'round-1', updatedAt: 5 }));
+  });
+
+  it('backfills durable invocation fields from bootstrap without losing newer live status', () => {
+    const current: RoomProjectionState = {
+      messages: [],
+      invocations: [
+        {
+          id: 'inv-1',
+          roomId: 'default-room',
+          threadId: 'default-thread',
+          sourceMessageId: '',
+          agentId: 'architect',
+          status: 'running',
+          createdAt: 5,
+          updatedAt: 5,
+        },
+      ],
+      roundProjection: { rounds: [], roundSteps: [] },
+    };
+    const bootstrap: BootstrapState = {
+      agents: [],
+      messages: [],
+      invocations: [
+        {
+          id: 'inv-1',
+          roomId: 'default-room',
+          threadId: 'default-thread',
+          sourceMessageId: 'msg-1',
+          agentId: 'architect',
+          status: 'queued',
+          roundId: 'round-1',
+          roundStepId: 'step-1',
+          runtimeSessionId: 'codex-session-1',
+          resumeMetadata: { runtime: 'codex-cli', sessionId: 'codex-session-1' },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      rounds: [],
+      roundSteps: [],
+    };
+
+    const merged = mergeBootstrapState(current, bootstrap);
+
+    expect(merged.invocations[0]).toEqual(
+      expect.objectContaining({
+        id: 'inv-1',
+        status: 'running',
+        sourceMessageId: 'msg-1',
+        roundId: 'round-1',
+        roundStepId: 'step-1',
+        runtimeSessionId: 'codex-session-1',
+        resumeMetadata: { runtime: 'codex-cli', sessionId: 'codex-session-1' },
+        updatedAt: 5,
+      }),
+    );
+  });
+});
+
 describe('deriveRoundStepStatus', () => {
   it('prefers linked invocation status over persisted step status', () => {
     const step: RoundStepRecord = {
@@ -241,5 +372,27 @@ describe('formatRecoveryMetadata', () => {
       '{\n  "runtime": "codex-cli",\n  "sessionId": "codex-session-1"\n}',
     );
     expect(formatRecoveryMetadata(undefined)).toBe('No resume metadata captured');
+  });
+});
+
+describe('audit loading projection', () => {
+  it('clears stale audit entries while a new invocation audit is loading', () => {
+    expect(createAuditLoadingState()).toEqual({ auditEntries: [], auditStatus: 'Loading audit' });
+  });
+
+  it('uses invocation updatedAt in the refresh key', () => {
+    const invocation: InvocationRecord = {
+      id: 'inv-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'msg-1',
+      agentId: 'architect',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 5,
+    };
+
+    expect(auditRefreshKey(invocation)).toBe('inv-1:5');
+    expect(auditRefreshKey(undefined)).toBe('');
   });
 });

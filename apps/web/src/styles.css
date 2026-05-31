@@ -189,10 +189,7 @@ h3 {
 .round-card {
   display: grid;
   gap: 10px;
-  padding: 12px;
-  border: 1px solid oklch(86% 0.012 255);
-  border-radius: 8px;
-  background: oklch(99% 0.004 255);
+  padding: 0;
 }
 
 .step-list,
@@ -220,6 +217,11 @@ h3 {
 .round-step:focus-visible {
   border-color: oklch(55% 0.12 250);
   outline: none;
+}
+
+.round-step.selected {
+  border-color: oklch(55% 0.12 250);
+  background: oklch(96% 0.018 250);
 }
 
 .round-step:disabled {
