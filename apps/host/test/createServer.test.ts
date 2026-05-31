@@ -88,9 +88,9 @@ function createHarness() {
     tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn(),
     getInvocation: vi.fn((invocationId: string) => {
-      if (invocationId !== 'inv-1') return null;
+      if (invocationId !== 'inv-1' && invocationId !== 'inv-2') return null;
       return {
-        id: 'inv-1',
+        id: invocationId,
         roomId: 'default-room',
         threadId: 'default-thread',
         sourceMessageId: 'msg-1',
@@ -220,6 +220,17 @@ describe('host server', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual(harness.repositories.listInvocationAudit('inv-1'));
+    await server.close();
+  });
+
+  it('returns an empty audit list for a known invocation without audit records', async () => {
+    const harness = createHarness();
+    const server = await createServer(harness);
+
+    const response = await server.inject({ method: 'GET', url: '/api/invocations/inv-2/audit' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
     await server.close();
   });
 
