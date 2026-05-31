@@ -225,13 +225,14 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
     const architectInvocation = findStepInvocation(invocations, steps[0].id);
     const architectMessage = architectInvocation ? findInvocationMessage(messages, architectInvocation.id) : undefined;
     if (step.agentId === 'reviewer') {
+      if (!architectMessage) return null;
       return buildReviewerPrompt({ sourceMessage, architectMessage });
     }
 
     const reviewerStep = steps.find((candidate) => candidate.agentId === 'reviewer');
     const reviewerInvocation = reviewerStep ? findStepInvocation(invocations, reviewerStep.id) : undefined;
     const reviewerMessage = reviewerInvocation ? findInvocationMessage(messages, reviewerInvocation.id) : undefined;
-    if (!reviewerMessage) return null;
+    if (!architectMessage || !reviewerMessage || parseReviewerVerdict(reviewerMessage.body) !== 'approved') return null;
     return buildImplementerPrompt({ sourceMessage, architectMessage, reviewerMessage });
   }
 
@@ -286,12 +287,15 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
     if (!currentStep) {
       throw new Error(`Round step not found for invocation: ${invocationId}`);
     }
+    const terminalReason = reason ?? (status === 'failed' ? 'Invocation failed' : 'Invocation canceled');
     if (isTerminalStepStatus(currentStep.status)) {
-      return;
+      if (currentStep.status !== status) {
+        return;
+      }
+    } else {
+      deps.repositories.updateRoundStepStatus(currentStep.id, status, { invocationId, error: terminalReason });
     }
 
-    const terminalReason = reason ?? (status === 'failed' ? 'Invocation failed' : 'Invocation canceled');
-    deps.repositories.updateRoundStepStatus(currentStep.id, status, { invocationId, error: terminalReason });
     const stepUpdates: Record<string, Partial<Pick<RoundStepRecord, 'status' | 'error' | 'invocationId' | 'updatedAt'>>> = {
       [currentStep.id]: { status, invocationId, error: terminalReason, updatedAt: Date.now() },
     };
@@ -464,12 +468,24 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
 
       for (const invocation of invocations) {
         if (invocation.status === 'queued') {
+          if (invocation.roundId && invocation.roundStepId) {
+            const round = deps.repositories.listRoundsByThread(threadId).find((candidate) => candidate.id === invocation.roundId);
+            const step = deps.repositories.listRoundSteps(invocation.roundId).find((candidate) => candidate.id === invocation.roundStepId);
+            if (!round || isTerminalRoundStatus(round.status)) {
+              appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.skipped_terminal_round', { metadata: { threadId } });
+              continue;
+            }
+            if (!step || step.status !== 'queued' || step.invocationId !== invocation.id) {
+              appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.skipped_inconsistent_queued_step', { metadata: { threadId } });
+              continue;
+            }
+          }
           const prompt = reconstructPrompt(invocation, messages, invocations);
           if (!prompt) {
             const error = 'Unable to reconstruct prompt during startup recovery';
-            deps.repositories.updateInvocationStatus(invocation.id, 'failed', error);
             appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.prompt_reconstruction_failed', { reason: error });
             await publishInvocationFailed(deps, invocation, error);
+            await settleRoundAfterInvocation(invocation.id, 'failed', error);
             result.failed.push(invocation.id);
             continue;
           }
@@ -481,17 +497,8 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
 
         if (invocation.status === 'running') {
           const error = 'Recovered stale running invocation after host restart';
-          deps.repositories.updateInvocationStatus(invocation.id, 'failed', error);
           appendRecoveryAudit(deps.repositories, invocation.id, 'recovery.stale_running_failed', { reason: error });
-          await deps.eventBus.publishRoomEvent({
-            type: 'invocation.failed',
-            roomId: invocation.roomId,
-            threadId: invocation.threadId,
-            invocationId: invocation.id,
-            agentId: invocation.agentId,
-            error,
-            occurredAt: Date.now(),
-          });
+          await publishInvocationFailed(deps, invocation, error);
           await settleRoundAfterInvocation(invocation.id, 'failed', error);
           result.failed.push(invocation.id);
           continue;
@@ -543,10 +550,12 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       if (!currentStep) {
         throw new Error(`Round step not found for invocation: ${invocationId}`);
       }
-      if (isTerminalStepStatus(currentStep.status)) {
+      if (isTerminalStepStatus(currentStep.status) && currentStep.status !== 'succeeded') {
         return null;
       }
-      deps.repositories.updateRoundStepStatus(currentStep.id, 'succeeded', { invocationId: completedInvocation.id });
+      if (currentStep.status !== 'succeeded') {
+        deps.repositories.updateRoundStepStatus(currentStep.id, 'succeeded', { invocationId: completedInvocation.id });
+      }
 
       const dependentStep = steps.find((step) => step.dependsOnStepId === currentStep.id);
       if (!dependentStep) {

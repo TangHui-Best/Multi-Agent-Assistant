@@ -501,6 +501,46 @@ test('same idempotency key returns the original message and invocations without 
   expect(eventBus.jobs).toHaveLength(1);
 });
 
+test('recoverThreadContinuity repairs a SQLite half-written succeeded step before worker startup', async () => {
+  const repositories = createRepositories(createDatabase(':memory:'));
+  repositories.ensureDefaultState();
+  const jobs: AgentJob[] = [];
+  const eventBus: EventBus = {
+    publishRoomEvent: vi.fn(async () => {}),
+    enqueueAgentJob: vi.fn(async (job: AgentJob) => {
+      jobs.push(job);
+    }),
+    readAgentJobs: vi.fn(async () => []),
+    ackAgentJob: vi.fn(async () => {}),
+    acquireAgentSlotLease: vi.fn(async () => true),
+    releaseAgentSlotLease: vi.fn(async () => {}),
+    subscribeRoomEvents: vi.fn(async () => async () => {}),
+    close: vi.fn(async () => {}),
+  };
+  const roomHub = createRoomHub({ repositories, eventBus });
+  const input: SubmitMessageInput = {
+    ...createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }),
+    roomId: 'default-room',
+    threadId: 'default-thread',
+  };
+  const { message, invocations } = await roomHub.submitMessage(input);
+  const round = repositories.listRoundsByThread('default-thread')[0];
+  const steps = repositories.listRoundSteps(round.id);
+  jobs.length = 0;
+  repositories.appendMessage(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  repositories.updateInvocationStatus(invocations[0].id, 'succeeded');
+  repositories.updateRoundStepStatus(steps[0].id, 'succeeded', { invocationId: invocations[0].id });
+
+  const result = await roomHub.recoverThreadContinuity('default-thread');
+
+  const recoveredSteps = repositories.listRoundSteps(round.id);
+  const recoveredInvocations = repositories.listInvocationsBySourceMessage(message.id);
+  expect(result.continued).toEqual([invocations[0].id]);
+  expect(recoveredSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
+  expect(recoveredInvocations.some((invocation) => invocation.agentId === 'reviewer' && invocation.status === 'queued')).toBe(true);
+  expect(jobs).toEqual([expect.objectContaining({ agentId: 'reviewer' })]);
+});
+
 test('cancelInvocation marks the target invocation canceled and publishes a cancellation event', async () => {
   const { events, invocations, repositories, roomHub, statusUpdates } = createHarness(['architect']);
   await roomHub.submitMessage(createInput({ mode: 'mention', agentIds: ['architect'] }));
@@ -609,6 +649,58 @@ test('recoverThreadContinuity is idempotent after it queues the next round step'
   expect(jobs.every((job) => job.invocationId !== invocations[0].id)).toBe(true);
 });
 
+test('recoverThreadContinuity continues when a succeeded step was persisted before the next step queued', async () => {
+  const { invocations, jobs, messages, roomHub, roundSteps } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  roundSteps[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  jobs.length = 0;
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.continued).toEqual([invocations[0].id]);
+  expect(jobs).toEqual([expect.objectContaining({ agentId: 'reviewer' })]);
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
+});
+
+test('recoverThreadContinuity completes a running round when its final step was already persisted succeeded', async () => {
+  const { invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  roundSteps[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  const reviewerInvocation: InvocationRecord = {
+    ...invocations[0],
+    id: 'reviewer-invocation-1',
+    agentId: 'reviewer',
+    status: 'succeeded',
+    roundStepId: roundSteps[1].id,
+  };
+  const implementerInvocation: InvocationRecord = {
+    ...invocations[0],
+    id: 'implementer-invocation-1',
+    agentId: 'implementer',
+    status: 'succeeded',
+    roundStepId: roundSteps[2].id,
+  };
+  roundSteps[1].status = 'succeeded';
+  roundSteps[1].invocationId = reviewerInvocation.id;
+  roundSteps[2].status = 'succeeded';
+  roundSteps[2].invocationId = implementerInvocation.id;
+  invocations.push(reviewerInvocation, implementerInvocation);
+  messages.push(
+    createAgentMessage({ invocation: reviewerInvocation, body: 'Looks safe\nVERDICT: approved' }),
+    createAgentMessage({ invocation: implementerInvocation, body: 'Implemented' }),
+  );
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.continued).toContain(implementerInvocation.id);
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'succeeded');
+  expect(rounds[0].status).toBe('succeeded');
+});
+
 test('recoverThreadContinuity settles failed round-linked invocations left before round convergence', async () => {
   const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
@@ -620,4 +712,94 @@ test('recoverThreadContinuity settles failed round-linked invocations left befor
   expect(result.settled).toEqual([invocations[0].id]);
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'adapter failed before settle callback');
   expect(roundSteps.map((step) => step.status)).toEqual(['failed', 'canceled', 'canceled']);
+});
+
+test('recoverThreadContinuity settles failed rounds when the failed step was already persisted', async () => {
+  const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'failed';
+  invocations[0].error = 'adapter failed before round write';
+  roundSteps[0].status = 'failed';
+  roundSteps[0].invocationId = invocations[0].id;
+  roundSteps[0].error = 'adapter failed before round write';
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.settled).toEqual([invocations[0].id]);
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'adapter failed before round write');
+  expect(roundSteps.map((step) => step.status)).toEqual(['failed', 'canceled', 'canceled']);
+});
+
+test('recoverThreadContinuity does not re-enqueue queued invocations from terminal rounds', async () => {
+  const { audits, invocations, jobs, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  rounds[0].status = 'failed';
+  rounds[0].error = 'previously failed';
+  jobs.length = 0;
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.requeued).toEqual([]);
+  expect(jobs).toEqual([]);
+  expect(roundSteps[0].status).toBe('queued');
+  expect(audits).toContainEqual(expect.objectContaining({ invocationId: invocations[0].id, eventType: 'recovery.skipped_terminal_round' }));
+});
+
+test('recoverThreadContinuity fails queued reviewer steps without architect output instead of guessing prompt context', async () => {
+  const { invocations, jobs, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  roundSteps[0].status = 'succeeded';
+  const reviewerInvocation: InvocationRecord = {
+    ...invocations[0],
+    id: 'reviewer-invocation-1',
+    agentId: 'reviewer',
+    status: 'queued',
+    roundStepId: roundSteps[1].id,
+  };
+  roundSteps[1].status = 'queued';
+  roundSteps[1].invocationId = reviewerInvocation.id;
+  invocations.push(reviewerInvocation);
+  jobs.length = 0;
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.failed).toEqual([reviewerInvocation.id]);
+  expect(jobs).toEqual([]);
+  expect(rounds[0].status).toBe('failed');
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'failed', 'canceled']);
+});
+
+test('recoverThreadContinuity settles queued round invocations when prompt reconstruction fails', async () => {
+  const { invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  roundSteps[0].status = 'succeeded';
+  roundSteps[1].status = 'succeeded';
+  roundSteps[2].status = 'queued';
+  const implementerInvocation: InvocationRecord = {
+    ...invocations[0],
+    id: 'implementer-invocation-1',
+    agentId: 'implementer',
+    status: 'queued',
+    roundStepId: roundSteps[2].id,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  roundSteps[2].invocationId = implementerInvocation.id;
+  invocations.push(implementerInvocation);
+
+  const result = await roomHub.recoverThreadContinuity('thread-1');
+
+  expect(result.failed).toEqual([implementerInvocation.id]);
+  expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(
+    implementerInvocation.id,
+    'failed',
+    'Unable to reconstruct prompt during startup recovery',
+  );
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(
+    rounds[0].id,
+    'failed',
+    'Unable to reconstruct prompt during startup recovery',
+  );
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'succeeded', 'failed']);
 });
