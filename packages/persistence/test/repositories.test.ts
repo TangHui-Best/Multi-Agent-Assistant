@@ -102,4 +102,56 @@ describe('persistence repositories', () => {
       name: 'idempotency_key',
     });
   });
+
+  it('stores rounds with ordered steps', () => {
+    const repositories = createRepositories(createDatabase(':memory:'));
+    repositories.ensureDefaultState();
+    repositories.appendMessage({
+      id: 'message-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      kind: 'user_message',
+      sender: { type: 'user', userId: 'local-user', source: 'web' },
+      body: 'Design review execute',
+      createdAt: 1,
+    });
+
+    repositories.createRound({
+      id: 'round-1',
+      roomId: 'default-room',
+      threadId: 'default-thread',
+      sourceMessageId: 'message-1',
+      workflow: 'design_review_execute',
+      status: 'running',
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    repositories.createRoundSteps([
+      {
+        id: 'step-1',
+        roundId: 'round-1',
+        stepIndex: 0,
+        agentId: 'architect',
+        status: 'queued',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+      {
+        id: 'step-2',
+        roundId: 'round-1',
+        stepIndex: 1,
+        agentId: 'reviewer',
+        dependsOnStepId: 'step-1',
+        status: 'pending',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ]);
+
+    expect(repositories.listRoundsByThread('default-thread').map((round) => round.id)).toEqual(['round-1']);
+    expect(repositories.listRoundSteps('round-1').map((step) => [step.id, step.agentId, step.dependsOnStepId])).toEqual([
+      ['step-1', 'architect', undefined],
+      ['step-2', 'reviewer', 'step-1'],
+    ]);
+  });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { EventBus } from '@multi-agent-assi/event-bus';
 import type { PersistenceRepositories } from '@multi-agent-assi/persistence';
-import type { AgentId, AgentJob, InvocationRecord, MessageRecord, SubmitMessageInput } from '@multi-agent-assi/shared';
+import type { AgentId, AgentJob, InvocationRecord, MessageRecord, RoundRecord, RoundStepRecord, SubmitMessageInput } from '@multi-agent-assi/shared';
 
 export interface RoomHub {
   submitMessage(input: SubmitMessageInput): Promise<{ message: MessageRecord; invocations: InvocationRecord[] }>;
@@ -10,7 +10,7 @@ export interface RoomHub {
 }
 
 const BROADCAST_TARGETS: AgentId[] = ['architect', 'reviewer', 'implementer'];
-const ORCHESTRATED_TARGETS: AgentId[] = ['architect', 'reviewer'];
+const DESIGN_REVIEW_EXECUTE_STEPS: AgentId[] = ['architect', 'reviewer', 'implementer'];
 
 function dedupeTargets(agentIds: AgentId[]): AgentId[] {
   const seen = new Set<AgentId>();
@@ -35,7 +35,7 @@ function resolveTargets(input: SubmitMessageInput, knownAgentIds: Set<AgentId>):
     return BROADCAST_TARGETS.filter((agentId) => knownAgentIds.has(agentId));
   }
 
-  return ORCHESTRATED_TARGETS.filter((agentId) => knownAgentIds.has(agentId));
+  return DESIGN_REVIEW_EXECUTE_STEPS.filter((agentId) => knownAgentIds.has(agentId));
 }
 
 function getErrorMessage(err: unknown): string {
@@ -85,6 +85,64 @@ async function failInvocationsFrom(
   }
 }
 
+function createInvocation(input: {
+  message: MessageRecord;
+  agentId: AgentId;
+  now: number;
+  roundId?: string;
+  roundStepId?: string;
+}): InvocationRecord {
+  return {
+    id: randomUUID(),
+    roomId: input.message.roomId,
+    threadId: input.message.threadId,
+    sourceMessageId: input.message.id,
+    agentId: input.agentId,
+    status: 'queued',
+    createdAt: input.now,
+    updatedAt: input.now,
+    ...(input.roundId ? { roundId: input.roundId } : {}),
+    ...(input.roundStepId ? { roundStepId: input.roundStepId } : {}),
+  };
+}
+
+function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<AgentId>, now: number): {
+  round: RoundRecord;
+  steps: RoundStepRecord[];
+  firstStep: RoundStepRecord;
+} {
+  const missingAgent = DESIGN_REVIEW_EXECUTE_STEPS.find((agentId) => !knownAgentIds.has(agentId));
+  if (missingAgent) {
+    throw new Error(`Unknown target agent: ${missingAgent}`);
+  }
+
+  const round: RoundRecord = {
+    id: randomUUID(),
+    roomId: message.roomId,
+    threadId: message.threadId,
+    sourceMessageId: message.id,
+    workflow: 'design_review_execute',
+    status: 'running',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const steps = DESIGN_REVIEW_EXECUTE_STEPS.map((agentId, index): RoundStepRecord => ({
+    id: randomUUID(),
+    roundId: round.id,
+    stepIndex: index,
+    agentId,
+    status: index === 0 ? 'queued' : 'pending',
+    createdAt: now,
+    updatedAt: now,
+    ...(index > 0 ? { dependsOnStepId: '' } : {}),
+  }));
+  return {
+    round,
+    steps: steps.map((step, index) => (index > 0 ? { ...step, dependsOnStepId: steps[index - 1].id } : step)),
+    firstStep: steps[0],
+  };
+}
+
 export function createRoomHub(deps: { repositories: PersistenceRepositories; eventBus: EventBus }): RoomHub {
   return {
     async submitMessage(input) {
@@ -111,19 +169,23 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       deps.repositories.appendMessage(message, { idempotencyKey: input.idempotencyKey });
 
       const invocations: InvocationRecord[] = [];
-      for (const agentId of targetAgentIds) {
-        const invocation: InvocationRecord = {
-          id: randomUUID(),
-          roomId: input.roomId,
-          threadId: input.threadId,
-          sourceMessageId: message.id,
-          agentId,
-          status: 'queued',
-          createdAt: now,
-          updatedAt: now,
-        };
+      let roundContext: { round: RoundRecord; steps: RoundStepRecord[] } | undefined;
+      if (input.target.mode === 'orchestrated') {
+        const { round, steps } = createDesignReviewRound(message, knownAgentIds, now);
+        const firstStep = steps[0];
+        deps.repositories.createRound(round);
+        deps.repositories.createRoundSteps(steps);
+        const invocation = createInvocation({ message, agentId: firstStep.agentId, now, roundId: round.id, roundStepId: firstStep.id });
         deps.repositories.createInvocation(invocation);
+        deps.repositories.updateRoundStepStatus(firstStep.id, 'queued', { invocationId: invocation.id });
         invocations.push(invocation);
+        roundContext = { round, steps };
+      } else {
+        for (const agentId of targetAgentIds) {
+          const invocation = createInvocation({ message, agentId, now });
+          deps.repositories.createInvocation(invocation);
+          invocations.push(invocation);
+        }
       }
 
       try {
@@ -137,6 +199,22 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       } catch (err) {
         await failInvocationsFrom(deps, invocations, 0, getErrorMessage(err));
         throw err;
+      }
+
+      if (roundContext) {
+        try {
+          await deps.eventBus.publishRoomEvent({
+            type: 'round.created',
+            roomId: input.roomId,
+            threadId: input.threadId,
+            round: roundContext.round,
+            steps: roundContext.steps,
+            occurredAt: Date.now(),
+          });
+        } catch (err) {
+          await failInvocationsFrom(deps, invocations, 0, getErrorMessage(err));
+          throw err;
+        }
       }
 
       for (const [index, invocation] of invocations.entries()) {

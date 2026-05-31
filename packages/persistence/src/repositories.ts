@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { AgentSeat, InvocationRecord, MessageRecord, RuntimeKind } from '@multi-agent-assi/shared';
+import type { AgentSeat, InvocationRecord, MessageRecord, RoundRecord, RoundStepRecord, RuntimeKind } from '@multi-agent-assi/shared';
 
 export interface PersistenceRepositories {
   ensureDefaultState(options?: { runtimeKind?: RuntimeKind }): void;
@@ -9,6 +9,12 @@ export interface PersistenceRepositories {
   createInvocation(invocation: InvocationRecord): void;
   listInvocationsBySourceMessage(sourceMessageId: string): InvocationRecord[];
   listInvocationsByThread(threadId: string): InvocationRecord[];
+  createRound(round: RoundRecord): void;
+  createRoundSteps(steps: RoundStepRecord[]): void;
+  listRoundsByThread(threadId: string): RoundRecord[];
+  listRoundSteps(roundId: string): RoundStepRecord[];
+  updateRoundStatus(id: string, status: RoundRecord['status'], error?: string): void;
+  updateRoundStepStatus(id: string, status: RoundStepRecord['status'], options?: { invocationId?: string; error?: string }): void;
   updateInvocationStatus(id: string, status: InvocationRecord['status'], error?: string): void;
   getInvocation(id: string): InvocationRecord | null;
   listAgents(): AgentSeat[];
@@ -32,6 +38,33 @@ type InvocationRow = {
   source_message_id: string;
   agent_id: string;
   status: InvocationRecord['status'];
+  error: string | null;
+  round_id: string | null;
+  round_step_id: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type RoundRow = {
+  id: string;
+  room_id: string;
+  thread_id: string;
+  source_message_id: string;
+  workflow: RoundRecord['workflow'];
+  status: RoundRecord['status'];
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type RoundStepRow = {
+  id: string;
+  round_id: string;
+  step_index: number;
+  agent_id: string;
+  status: RoundStepRecord['status'];
+  invocation_id: string | null;
+  depends_on_step_id: string | null;
   error: string | null;
   created_at: number;
   updated_at: number;
@@ -60,6 +93,37 @@ function toInvocationRecord(row: InvocationRow): InvocationRecord {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.error ? { error: row.error } : {}),
+    ...(row.round_id ? { roundId: row.round_id } : {}),
+    ...(row.round_step_id ? { roundStepId: row.round_step_id } : {}),
+  };
+}
+
+function toRoundRecord(row: RoundRow): RoundRecord {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    threadId: row.thread_id,
+    sourceMessageId: row.source_message_id,
+    workflow: row.workflow,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.error ? { error: row.error } : {}),
+  };
+}
+
+function toRoundStepRecord(row: RoundStepRow): RoundStepRecord {
+  return {
+    id: row.id,
+    roundId: row.round_id,
+    stepIndex: row.step_index,
+    agentId: row.agent_id,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.invocation_id ? { invocationId: row.invocation_id } : {}),
+    ...(row.depends_on_step_id ? { dependsOnStepId: row.depends_on_step_id } : {}),
     ...(row.error ? { error: row.error } : {}),
   };
 }
@@ -110,8 +174,8 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
 
     createInvocation(invocation) {
       db.prepare(`
-        insert into invocations (id, room_id, thread_id, source_message_id, agent_id, status, error, created_at, updated_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        insert into invocations (id, room_id, thread_id, source_message_id, agent_id, status, error, round_id, round_step_id, created_at, updated_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         invocation.id,
         invocation.roomId,
@@ -120,6 +184,8 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
         invocation.agentId,
         invocation.status,
         invocation.error ?? null,
+        invocation.roundId ?? null,
+        invocation.roundStepId ?? null,
         invocation.createdAt,
         invocation.updatedAt,
       );
@@ -137,6 +203,77 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
         .prepare('select * from invocations where thread_id = ? order by created_at asc, rowid asc')
         .all(threadId)
         .map((row) => toInvocationRecord(row as InvocationRow));
+    },
+
+    createRound(round) {
+      db.prepare(`
+        insert into rounds (id, room_id, thread_id, source_message_id, workflow, status, error, created_at, updated_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        round.id,
+        round.roomId,
+        round.threadId,
+        round.sourceMessageId,
+        round.workflow,
+        round.status,
+        round.error ?? null,
+        round.createdAt,
+        round.updatedAt,
+      );
+    },
+
+    createRoundSteps(steps) {
+      const insert = db.prepare(`
+        insert into round_steps (id, round_id, step_index, agent_id, status, invocation_id, depends_on_step_id, error, created_at, updated_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const transaction = db.transaction((records: RoundStepRecord[]) => {
+        for (const step of records) {
+          insert.run(
+            step.id,
+            step.roundId,
+            step.stepIndex,
+            step.agentId,
+            step.status,
+            step.invocationId ?? null,
+            step.dependsOnStepId ?? null,
+            step.error ?? null,
+            step.createdAt,
+            step.updatedAt,
+          );
+        }
+      });
+      transaction(steps);
+    },
+
+    listRoundsByThread(threadId) {
+      return db
+        .prepare('select * from rounds where thread_id = ? order by created_at asc, rowid asc')
+        .all(threadId)
+        .map((row) => toRoundRecord(row as RoundRow));
+    },
+
+    listRoundSteps(roundId) {
+      return db
+        .prepare('select * from round_steps where round_id = ? order by step_index asc, rowid asc')
+        .all(roundId)
+        .map((row) => toRoundStepRecord(row as RoundStepRow));
+    },
+
+    updateRoundStatus(id, status, error) {
+      const result = db.prepare('update rounds set status = ?, error = ?, updated_at = ? where id = ?').run(status, error ?? null, Date.now(), id);
+      if (result.changes === 0) {
+        throw new Error(`Round not found: ${id}`);
+      }
+    },
+
+    updateRoundStepStatus(id, status, options) {
+      const result = db
+        .prepare('update round_steps set status = ?, invocation_id = coalesce(?, invocation_id), error = ?, updated_at = ? where id = ?')
+        .run(status, options?.invocationId ?? null, options?.error ?? null, Date.now(), id);
+      if (result.changes === 0) {
+        throw new Error(`Round step not found: ${id}`);
+      }
     },
 
     updateInvocationStatus(id, status, error) {

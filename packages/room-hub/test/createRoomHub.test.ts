@@ -31,6 +31,8 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
   const jobs: AgentJob[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
+  const rounds: import('@multi-agent-assi/shared').RoundRecord[] = [];
+  const roundSteps: import('@multi-agent-assi/shared').RoundStepRecord[] = [];
   const actions: string[] = [];
   const repositories: PersistenceRepositories = {
     ensureDefaultState: vi.fn(),
@@ -42,6 +44,16 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     createInvocation: vi.fn((invocation: InvocationRecord) => {
       invocations.push(invocation);
     }),
+    createRound: vi.fn((round) => {
+      rounds.push(round);
+    }),
+    createRoundSteps: vi.fn((steps) => {
+      roundSteps.push(...steps);
+    }),
+    listRoundsByThread: vi.fn((threadId: string) => rounds.filter((round) => round.threadId === threadId)),
+    listRoundSteps: vi.fn((roundId: string) => roundSteps.filter((step) => step.roundId === roundId)),
+    updateRoundStatus: vi.fn(),
+    updateRoundStepStatus: vi.fn(),
     listInvocationsBySourceMessage: vi.fn((sourceMessageId: string) =>
       invocations.filter((invocation) => invocation.sourceMessageId === sourceMessageId),
     ),
@@ -76,6 +88,8 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     events,
     actions,
     statusUpdates,
+    rounds,
+    roundSteps,
     roomHub: createRoomHub({ repositories, eventBus }),
   };
 }
@@ -182,6 +196,25 @@ test('successful broadcast queues three known agents', async () => {
     'event:invocation.queued:implementer',
     'job:implementer',
   ]);
+});
+
+test('design_review_execute creates a persisted round and queues only the architect step first', async () => {
+  const { events, invocations, jobs, roomHub, rounds, roundSteps } = createHarness(['architect', 'reviewer', 'implementer']);
+
+  const result = await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+
+  expect(rounds).toEqual([
+    expect.objectContaining({ workflow: 'design_review_execute', status: 'running', sourceMessageId: result.message.id }),
+  ]);
+  expect(roundSteps.map((step) => [step.stepIndex, step.agentId, step.status, step.dependsOnStepId])).toEqual([
+    [0, 'architect', 'queued', undefined],
+    [1, 'reviewer', 'pending', roundSteps[0].id],
+    [2, 'implementer', 'pending', roundSteps[1].id],
+  ]);
+  expect(result.invocations).toHaveLength(1);
+  expect(invocations[0]).toMatchObject({ agentId: 'architect', roundId: rounds[0].id, roundStepId: roundSteps[0].id });
+  expect(jobs.map((job) => job.agentId)).toEqual(['architect']);
+  expect(events.map((event) => event.type)).toContain('round.created');
 });
 
 test('same idempotency key returns the original message and invocations without duplicate jobs', async () => {
