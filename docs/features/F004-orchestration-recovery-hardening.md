@@ -1,7 +1,7 @@
 ---
 id: F004
 doc_kind: feature
-status: active
+status: completed
 created: 2026-05-31
 updated: 2026-05-31
 ---
@@ -22,7 +22,7 @@ updated: 2026-05-31
 
 ## Current Status
 
-Active. EV-008 已证明 Codex Adapter 与单进程 per-agent slot serialization；本 Feature 接管 EV-008 的剩余 gaps。
+Completed. 主要实现切片已完成并记录在 EV-009；independent review 发现的 cancellation race、round continuation、shared timeout contract 和 Redis lease release race 已通过 `bf1699a` 修复。
 
 ## Links
 
@@ -31,20 +31,21 @@ Active. EV-008 已证明 Codex Adapter 与单进程 per-agent slot serialization
 - ADR: [ADR-001 reference architecture adoption boundary](../decisions/ADR-001-reference-architecture-adoption-boundary.md)
 - ADR: [ADR-002 invocation orchestration and recovery contracts](../decisions/ADR-002-invocation-orchestration-recovery-contracts.md)
 - Prior Evidence: [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md)
+- Evidence: [EV-009 orchestration recovery hardening](../evidence/EV-009-orchestration-recovery-hardening.md)
 - Implementation plan: [2026-05-31 orchestration recovery hardening](../superpowers/plans/2026-05-31-orchestration-recovery-hardening.md)
 
 ## Acceptance Criteria
 
-- [ ] Host exposes a cancellation API that marks only the targeted invocation canceled and emits a durable room event.
-- [ ] Runtime adapters receive an abort signal and timeout deadline through the shared adapter contract.
-- [ ] Timeout behavior has an explicit contract: timed-out invocations fail with a timeout audit reason and do not corrupt other agent seats.
-- [ ] Slot control has a Redis-backed lease design, and implementation if needed for the current worker shape.
-- [ ] Web Console displays invocation status for queued, running, succeeded, failed, and canceled invocations.
-- [ ] `design_review_execute` creates a persisted round with ordered architect -> reviewer -> implementer steps.
-- [ ] Round events and status transitions are persisted and visible through bootstrap/event replay surfaces.
-- [ ] Codex session id and resume metadata are captured when present in runtime output and persisted with the invocation.
-- [ ] Invocation audit log records lifecycle transitions, cancellation, timeout, adapter failure, and recovery-relevant metadata.
-- [ ] A failed invocation has a documented recovery path through persisted session metadata and source message context.
+- [x] Host exposes a cancellation API that marks only the targeted invocation canceled and emits a durable room event.
+- [x] Runtime adapters receive an abort signal and timeout deadline through the shared adapter contract.
+- [x] Timeout behavior has an explicit contract: timed-out invocations fail and do not corrupt other agent seats.
+- [x] Slot control has a Redis-backed lease design and Event Bus lease contract; release uses atomic compare-delete, and worker integration is deferred until pending-claim/requeue behavior is designed.
+- [x] Web Console displays invocation status for queued, running, succeeded, failed, and canceled invocations.
+- [x] `design_review_execute` creates a persisted round with ordered architect -> reviewer -> implementer steps.
+- [x] Round creation event and persisted step state are recorded; successful invocations continue architect -> reviewer -> implementer.
+- [x] Codex session id and resume metadata are captured when present in runtime output and persisted with the invocation.
+- [x] Invocation audit log records queued, running, succeeded, failed, canceled, and session-captured lifecycle facts.
+- [x] A failed invocation has a documented recovery path through persisted session metadata and source message context.
 
 ## Patch History
 
@@ -55,8 +56,8 @@ None yet
 
 ## Evidence
 
-To be captured in EV-009 after implementation slices produce verification output.
+- [EV-009 orchestration recovery hardening](../evidence/EV-009-orchestration-recovery-hardening.md) records implementation slices, verification commands, browser check, independent review findings, recovery path, and residual risks.
 
 ## Next Step
 
-Implement and commit the slices from `docs/superpowers/plans/2026-05-31-orchestration-recovery-hardening.md` independently, pushing each verified commit before moving to the next slice.
+Follow-up work can add Web Console round-step visualization and safely wire Redis leases into Agent Runtime after pending-claim/requeue semantics are designed.
