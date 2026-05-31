@@ -5,9 +5,16 @@ export type ReviewerVerdict = 'approved' | 'changes_requested';
 export const DESIGN_REVIEW_EXECUTE_STEP_AGENT_IDS = ['architect', 'reviewer', 'implementer'] as const satisfies readonly AgentId[];
 
 export function parseReviewerVerdict(body: string): ReviewerVerdict | null {
-  const match = body.match(/^\s*VERDICT:\s*(approved|approve|changes_requested|request_changes)\b/im);
-  if (!match) return null;
-  return match[1] === 'approved' || match[1] === 'approve' ? 'approved' : 'changes_requested';
+  const matches = [...body.matchAll(/^\s*VERDICT:\s*(approved|approve|changes_requested|request_changes)\b/img)];
+  if (matches.length !== 1) return null;
+  const finalLine = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1);
+  if (!finalLine?.match(/^VERDICT:\s*(approved|approve|changes_requested|request_changes)\b/i)) return null;
+  const verdict = matches[0][1];
+  return verdict === 'approved' || verdict === 'approve' ? 'approved' : 'changes_requested';
 }
 
 export function buildArchitectPrompt(sourceMessage: MessageRecord): string {

@@ -67,8 +67,23 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     }),
     listRoundsByThread: vi.fn((threadId: string) => rounds.filter((round) => round.threadId === threadId)),
     listRoundSteps: vi.fn((roundId: string) => roundSteps.filter((step) => step.roundId === roundId)),
-    updateRoundStatus: vi.fn(),
-    updateRoundStepStatus: vi.fn(),
+    updateRoundStatus: vi.fn((id, status, error) => {
+      const round = rounds.find((item) => item.id === id);
+      if (round) {
+        round.status = status;
+        round.error = error;
+        round.updatedAt = Date.now();
+      }
+    }),
+    updateRoundStepStatus: vi.fn((id, status, options) => {
+      const step = roundSteps.find((item) => item.id === id);
+      if (step) {
+        step.status = status;
+        step.updatedAt = Date.now();
+        if (options?.invocationId) step.invocationId = options.invocationId;
+        step.error = options?.error;
+      }
+    }),
     updateInvocationRecoveryMetadata: vi.fn(),
     appendInvocationAudit: vi.fn((entry) => {
       audits.push(entry);
@@ -81,6 +96,12 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
     tryStartInvocation: vi.fn(() => true),
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
+      const invocation = invocations.find((item) => item.id === id);
+      if (invocation) {
+        invocation.status = status;
+        invocation.error = error;
+        invocation.updatedAt = Date.now();
+      }
     }),
     getInvocation: vi.fn((id: string) => invocations.find((invocation) => invocation.id === id) ?? null),
     listAgents: vi.fn(() => agentIds.map(createAgent)),
@@ -123,11 +144,13 @@ beforeEach(() => {
 });
 
 test('parseReviewerVerdict accepts only explicit reviewer verdict lines', () => {
-  expect(parseReviewerVerdict('VERDICT: approved\nNo blocking issues.')).toBe('approved');
+  expect(parseReviewerVerdict('No blocking issues.\nVERDICT: approved')).toBe('approved');
   expect(parseReviewerVerdict(' verdict: approve ')).toBe('approved');
-  expect(parseReviewerVerdict('VERDICT: changes_requested\nMissing failure tests.')).toBe('changes_requested');
+  expect(parseReviewerVerdict('Missing failure tests.\nVERDICT: changes_requested')).toBe('changes_requested');
   expect(parseReviewerVerdict('VERDICT: request_changes')).toBe('changes_requested');
+  expect(parseReviewerVerdict('VERDICT: approved\nNo blocking issues.')).toBeNull();
   expect(parseReviewerVerdict('Looks good to me.')).toBeNull();
+  expect(parseReviewerVerdict('VERDICT: changes_requested\n...\nVERDICT: approved')).toBeNull();
 });
 
 test('unknown mentioned agent rejects before durable writes or Redis side effects', async () => {
@@ -249,10 +272,11 @@ test('design_review_execute creates a persisted round and queues only the archit
   expect(events.map((event) => event.type)).toContain('round.created');
 });
 
-test('continueRoundAfterInvocation queues reviewer then approved implementer and completes the round', async () => {
-  const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+test('continueRoundAfterInvocation queues reviewer then approved implementer and publishes live round updates', async () => {
+  const { events, invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
   const architectInvocation = invocations[0];
+  architectInvocation.status = 'succeeded';
   messages.push(createAgentMessage({ invocation: architectInvocation, body: 'Architecture plan v1' }));
 
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(architectInvocation.id);
@@ -260,20 +284,35 @@ test('continueRoundAfterInvocation queues reviewer then approved implementer and
   expect(jobs.map((job) => job.agentId)).toEqual(['architect', 'reviewer']);
   expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[0].id, 'succeeded', { invocationId: architectInvocation.id });
   expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'queued', { invocationId: reviewerInvocation?.id });
+  expect(events.at(-1)).toMatchObject({
+    type: 'round.updated',
+    round: expect.objectContaining({ id: rounds[0].id, status: 'running' }),
+  });
 
-  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: approved\nNo blockers.' }));
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'No blockers.\nVERDICT: approved' }));
+  reviewerInvocation!.status = 'succeeded';
   const implementerInvocation = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
   expect(implementerInvocation).toMatchObject({ agentId: 'implementer', roundId: rounds[0].id, roundStepId: roundSteps[2].id });
+  expect(events.at(-1)).toMatchObject({
+    type: 'round.updated',
+    steps: expect.arrayContaining([expect.objectContaining({ id: roundSteps[2].id, status: 'queued' })]),
+  });
 
+  implementerInvocation!.status = 'succeeded';
   const done = await roomHub.continueRoundAfterInvocation(implementerInvocation!.id);
   expect(done).toBeNull();
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'succeeded');
+  expect(events.at(-1)).toMatchObject({
+    type: 'round.updated',
+    round: expect.objectContaining({ id: rounds[0].id, status: 'succeeded' }),
+  });
 });
 
 test('design_review_execute prompts reviewer with architect output and requires verdict before implementer', async () => {
   const { invocations, jobs, messages, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
   const architectInvocation = invocations[0];
+  architectInvocation.status = 'succeeded';
   messages.push(createAgentMessage({ invocation: architectInvocation, body: 'Architecture plan v1' }));
 
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(architectInvocation.id);
@@ -285,22 +324,25 @@ test('design_review_execute prompts reviewer with architect output and requires 
   });
   expect(jobs.at(-1)?.prompt).toContain('VERDICT: approved or VERDICT: changes_requested');
 
-  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: approved\nShip it.' }));
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'Ship it.\nVERDICT: approved' }));
+  reviewerInvocation!.status = 'succeeded';
   const implementerInvocation = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
 
   expect(implementerInvocation).toMatchObject({ agentId: 'implementer', roundId: rounds[0].id, roundStepId: roundSteps[2].id });
   expect(jobs.at(-1)).toMatchObject({
     agentId: 'implementer',
-    prompt: expect.stringContaining('Reviewer output:\nVERDICT: approved\nShip it.'),
+    prompt: expect.stringContaining('Reviewer output:\nShip it.\nVERDICT: approved'),
   });
 });
 
 test('reviewer changes requested verdict stops the round without queuing implementer', async () => {
   const { events, invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
   messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
-  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'VERDICT: changes_requested\nMissing recovery tests.' }));
+  reviewerInvocation!.status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'Missing recovery tests.\nVERDICT: changes_requested' }));
 
   const result = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
 
@@ -317,8 +359,10 @@ test('reviewer changes requested verdict stops the round without queuing impleme
 test('missing reviewer verdict stops the round without queuing implementer', async () => {
   const { invocations, jobs, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
   messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+  reviewerInvocation!.status = 'succeeded';
   messages.push(createAgentMessage({ invocation: reviewerInvocation!, body: 'Looks good, but no explicit verdict.' }));
 
   const result = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
@@ -334,6 +378,7 @@ test('missing reviewer verdict stops the round without queuing implementer', asy
 test('settleRoundAfterInvocation fails current step, cancels dependents, and fails the round', async () => {
   const { invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
   await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
   messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
   const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
 
@@ -347,6 +392,62 @@ test('settleRoundAfterInvocation fails current step, cancels dependents, and fai
     error: 'Blocked by failed reviewer step',
   });
   expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'reviewer runtime failed');
+});
+
+test('duplicate continuation for a non-final step is a no-op after the next step is already queued', async () => {
+  const { invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  await roomHub.continueRoundAfterInvocation(invocations[0].id);
+
+  const duplicate = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+
+  expect(duplicate).toBeNull();
+  expect(repositories.updateRoundStatus).not.toHaveBeenCalledWith(rounds[0].id, 'succeeded');
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
+});
+
+test('stale failure for an already succeeded step does not overwrite downstream progress', async () => {
+  const { invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(invocations[0].id);
+  reviewerInvocation!.status = 'running';
+
+  await roomHub.settleRoundAfterInvocation(invocations[0].id, 'failed', 'late stale architect failure');
+
+  expect(repositories.updateRoundStepStatus).not.toHaveBeenCalledWith(roundSteps[0].id, 'failed', expect.anything());
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'queued', 'pending']);
+  expect(rounds[0].status).toBe('running');
+});
+
+test('next-step enqueue failure fails that step, cancels later pending steps, and publishes a round update', async () => {
+  const { eventBus, events, invocations, messages, repositories, roomHub, roundSteps, rounds } = createHarness([
+    'architect',
+    'reviewer',
+    'implementer',
+  ]);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  messages.push(createAgentMessage({ invocation: invocations[0], body: 'Architecture plan v1' }));
+  vi.mocked(eventBus.enqueueAgentJob).mockRejectedValueOnce(new Error('redis down'));
+
+  await expect(roomHub.continueRoundAfterInvocation(invocations[0].id)).rejects.toThrow('redis down');
+
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'failed', {
+    invocationId: expect.any(String),
+    error: 'redis down',
+  });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[2].id, 'canceled', {
+    error: 'Blocked by failed reviewer step',
+  });
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'failed', 'redis down');
+  expect(events.at(-1)).toMatchObject({
+    type: 'round.updated',
+    round: expect.objectContaining({ id: rounds[0].id, status: 'failed', error: 'redis down' }),
+  });
 });
 
 test('cancelInvocation settles a round-linked invocation and cancels dependent steps', async () => {
@@ -415,4 +516,19 @@ test('cancelInvocation marks the target invocation canceled and publishes a canc
     reason: 'user requested stop',
   });
   expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(invocations[0].id, 'canceled', 'user requested stop');
+});
+
+test('cancelInvocation does not overwrite an already succeeded invocation', async () => {
+  const { events, invocations, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  invocations[0].status = 'succeeded';
+  roundSteps[0].status = 'succeeded';
+
+  const result = await roomHub.cancelInvocation(invocations[0].id, 'late cancel');
+
+  expect(result.status).toBe('succeeded');
+  expect(repositories.updateInvocationStatus).not.toHaveBeenCalledWith(invocations[0].id, 'canceled', 'late cancel');
+  expect(roundSteps.map((step) => step.status)).toEqual(['succeeded', 'pending', 'pending']);
+  expect(rounds[0].status).toBe('running');
+  expect(events.at(-1)).not.toMatchObject({ type: 'invocation.canceled' });
 });

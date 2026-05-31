@@ -142,7 +142,15 @@ function findStepInvocation(invocations: InvocationRecord[], stepId: string): In
 }
 
 function getDependentSteps(steps: RoundStepRecord[], currentStep: RoundStepRecord): RoundStepRecord[] {
-  return steps.filter((step) => step.stepIndex > currentStep.stepIndex && step.status !== 'failed' && step.status !== 'canceled');
+  return steps.filter((step) => step.stepIndex > currentStep.stepIndex && (step.status === 'pending' || step.status === 'queued'));
+}
+
+function isTerminalRoundStatus(status: RoundRecord['status']): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+}
+
+function isTerminalStepStatus(status: RoundStepRecord['status']): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
 }
 
 function createDesignReviewRound(message: MessageRecord, knownAgentIds: Set<AgentId>, now: number): {
@@ -224,10 +232,18 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       return;
     }
 
+    const round = deps.repositories.listRoundsByThread(invocation.threadId).find((candidate) => candidate.id === invocation.roundId);
+    if (!round || isTerminalRoundStatus(round.status)) {
+      return;
+    }
+
     const steps = deps.repositories.listRoundSteps(invocation.roundId);
     const currentStep = steps.find((step) => step.id === invocation.roundStepId);
     if (!currentStep) {
       throw new Error(`Round step not found for invocation: ${invocationId}`);
+    }
+    if (isTerminalStepStatus(currentStep.status)) {
+      return;
     }
 
     const terminalReason = reason ?? (status === 'failed' ? 'Invocation failed' : 'Invocation canceled');
@@ -366,6 +382,9 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       if (!invocation) {
         throw new Error(`Invocation not found: ${invocationId}`);
       }
+      if (invocation.status === 'succeeded' || invocation.status === 'failed') {
+        return invocation;
+      }
       if (invocation.status !== 'canceled') {
         deps.repositories.updateInvocationStatus(invocation.id, 'canceled', reason);
         deps.repositories.appendInvocationAudit({
@@ -397,19 +416,42 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       if (!completedInvocation?.roundId || !completedInvocation.roundStepId) {
         return null;
       }
+      if (completedInvocation.status !== 'succeeded') {
+        return null;
+      }
+
+      const round = deps.repositories.listRoundsByThread(completedInvocation.threadId).find((candidate) => candidate.id === completedInvocation.roundId);
+      if (!round || isTerminalRoundStatus(round.status)) {
+        return null;
+      }
 
       const steps = deps.repositories.listRoundSteps(completedInvocation.roundId);
       const currentStep = steps.find((step) => step.id === completedInvocation.roundStepId);
       if (!currentStep) {
         throw new Error(`Round step not found for invocation: ${invocationId}`);
       }
-      deps.repositories.updateRoundStepStatus(currentStep.id, 'succeeded', { invocationId: completedInvocation.id });
-
-      const nextStep = steps.find((step) => step.dependsOnStepId === currentStep.id && step.status === 'pending');
-      if (!nextStep) {
-        deps.repositories.updateRoundStatus(completedInvocation.roundId, 'succeeded');
+      if (isTerminalStepStatus(currentStep.status)) {
         return null;
       }
+      deps.repositories.updateRoundStepStatus(currentStep.id, 'succeeded', { invocationId: completedInvocation.id });
+
+      const dependentStep = steps.find((step) => step.dependsOnStepId === currentStep.id);
+      if (!dependentStep) {
+        deps.repositories.updateRoundStatus(completedInvocation.roundId, 'succeeded');
+        await publishRoundUpdated({
+          roundId: completedInvocation.roundId,
+          threadId: completedInvocation.threadId,
+          status: 'succeeded',
+          stepUpdates: {
+            [currentStep.id]: { status: 'succeeded', invocationId: completedInvocation.id, updatedAt: Date.now() },
+          },
+        });
+        return null;
+      }
+      if (dependentStep.status !== 'pending') {
+        return null;
+      }
+      const nextStep = dependentStep;
 
       const threadMessages = deps.repositories.listMessages(completedInvocation.threadId);
       const sourceMessage = threadMessages.find((message) => message.id === completedInvocation.sourceMessageId);
@@ -461,11 +503,30 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       deps.repositories.updateRoundStepStatus(nextStep.id, 'queued', { invocationId: nextInvocation.id });
       try {
         await publishAndEnqueueInvocation(deps, nextInvocation, prompt);
+        await publishRoundUpdated({
+          roundId: completedInvocation.roundId,
+          threadId: completedInvocation.threadId,
+          status: 'running',
+          stepUpdates: {
+            [currentStep.id]: { status: 'succeeded', invocationId: completedInvocation.id, updatedAt: Date.now() },
+            [nextStep.id]: { status: 'queued', invocationId: nextInvocation.id, updatedAt: Date.now() },
+          },
+        });
       } catch (err) {
         const error = getErrorMessage(err);
         await publishInvocationFailed(deps, nextInvocation, error);
         deps.repositories.updateRoundStepStatus(nextStep.id, 'failed', { invocationId: nextInvocation.id, error });
+        const stepUpdates: Record<string, Partial<Pick<RoundStepRecord, 'status' | 'error' | 'invocationId' | 'updatedAt'>>> = {
+          [currentStep.id]: { status: 'succeeded', invocationId: completedInvocation.id, updatedAt: Date.now() },
+          [nextStep.id]: { status: 'failed', invocationId: nextInvocation.id, error, updatedAt: Date.now() },
+        };
+        for (const step of getDependentSteps(steps, nextStep)) {
+          const dependentError = `Blocked by failed ${nextStep.agentId} step`;
+          deps.repositories.updateRoundStepStatus(step.id, 'canceled', { error: dependentError });
+          stepUpdates[step.id] = { status: 'canceled', error: dependentError, updatedAt: Date.now() };
+        }
         deps.repositories.updateRoundStatus(completedInvocation.roundId, 'failed', error);
+        await publishRoundUpdated({ roundId: completedInvocation.roundId, threadId: completedInvocation.threadId, status: 'failed', error, stepUpdates });
         throw err;
       }
       return nextInvocation;

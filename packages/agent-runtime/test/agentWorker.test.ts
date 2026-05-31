@@ -494,6 +494,28 @@ test('notifies the host when an invocation fails durably', async () => {
   expect(onInvocationFailed).toHaveBeenCalledWith(job.invocationId, 'adapter failed');
 });
 
+test('acks and releases the slot without waiting for a hanging failure callback', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => {
+      throw new Error('adapter failed');
+    }),
+  };
+  const { acknowledgements, eventBus, runtimeOrder, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+    onInvocationFailed: vi.fn(() => new Promise(() => {})),
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(eventBus.releaseAgentSlotLease).toHaveBeenCalled();
+  expect(runtimeOrder).toEqual(['ack:stream-1', 'release:architect']);
+});
+
 test('acks a terminal invocation without acquiring a slot lease or rerunning the adapter', async () => {
   const job = createJob();
   const adapter: RuntimeAdapter = {

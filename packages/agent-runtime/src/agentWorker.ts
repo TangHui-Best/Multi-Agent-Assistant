@@ -49,6 +49,12 @@ function appendInvocationAudit(
   });
 }
 
+function notifyInvocationFailed(callback: ((invocationId: string, error: string) => Promise<void>) | undefined, invocationId: string, error: string): void {
+  void callback?.(invocationId, error).catch((callbackErr) => {
+    console.warn(`Unable to settle failed invocation: ${invocationId}`, callbackErr);
+  });
+}
+
 async function markAndPublishFailure(
   deps: { repositories: PersistenceRepositories; eventBus: EventBus },
   job: AgentJob,
@@ -227,11 +233,7 @@ async function processJob(
       }
       const error = getErrorMessage(err);
       await markAndPublishFailure(deps, job, error);
-      try {
-        await deps.onInvocationFailed?.(job.invocationId, error);
-      } catch (callbackErr) {
-        console.warn(`Unable to settle failed invocation: ${job.invocationId}`, callbackErr);
-      }
+      notifyInvocationFailed(deps.onInvocationFailed, job.invocationId, error);
       return true;
     } else {
       console.warn(`Agent worker completed durable output but a later event publish failed: ${streamId}`, err);
@@ -287,11 +289,7 @@ export function createAgentWorker(deps: {
       if (leasedStatus === 'running') {
         const error = 'Stale running invocation recovered after slot lease expired';
         await markAndPublishFailure(deps, job, error);
-        try {
-          await deps.onInvocationFailed?.(job.invocationId, error);
-        } catch (callbackErr) {
-          console.warn(`Unable to settle failed invocation: ${job.invocationId}`, callbackErr);
-        }
+        notifyInvocationFailed(deps.onInvocationFailed, job.invocationId, error);
         await deps.eventBus.ackAgentJob(consumerGroup, streamId);
         return true;
       }
