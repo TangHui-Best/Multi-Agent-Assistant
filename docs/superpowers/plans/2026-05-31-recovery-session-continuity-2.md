@@ -21,39 +21,39 @@
 
 ## Task 1: Recovery Re-Enqueues Queued Work
 
-- [ ] Write failing Room Hub tests for queued mention invocation and queued architect step re-enqueue.
-- [ ] Run `pnpm.cmd exec vitest run packages/room-hub/test/createRoomHub.test.ts` and confirm RED.
-- [ ] Implement `recoverThreadContinuity(threadId)` with queued invocation prompt reconstruction and `enqueueAgentJob`.
-- [ ] Add audit entry `recovery.requeued` for recovered queued invocations.
-- [ ] Run focused tests and commit `feat: recover queued invocations on startup`.
+- [x] Write failing Room Hub tests for queued mention invocation and queued architect step re-enqueue.
+- [x] Run `pnpm.cmd exec vitest run packages/room-hub/test/createRoomHub.test.ts` and confirm RED.
+- [x] Implement `recoverThreadContinuity(threadId)` with queued invocation prompt reconstruction and `enqueueAgentJob`.
+- [x] Add audit entry `recovery.requeued` for recovered queued invocations.
+- [x] Run focused tests and commit `feat: recover queued invocations on startup`.
 
 ## Task 2: Recovery Settles Stale Running Work
 
-- [ ] Write failing tests where a persisted `running` invocation remains after restart.
-- [ ] Assert recovery marks it failed, appends audit reason, publishes `invocation.failed`, and settles any linked round through existing policy convergence.
-- [ ] Run focused tests and confirm RED.
-- [ ] Implement stale running recovery.
-- [ ] Run focused tests and commit `feat: reconcile stale running invocations`.
+- [x] Write failing tests where a persisted `running` invocation remains after restart.
+- [x] Assert recovery marks it failed, appends audit reason, publishes `invocation.failed`, and settles any linked round through existing policy convergence.
+- [x] Run focused tests and confirm RED.
+- [x] Implement stale running recovery.
+- [x] Run focused tests and commit `feat: reconcile stale running invocations`.
 
 ## Task 3: Recovery Continues Or Settles Non-Terminal Rounds
 
-- [ ] Write failing tests for succeeded architect/reviewer/implementer invocations attached to non-terminal rounds.
-- [ ] Write failing tests for failed/canceled round-linked invocations attached to non-terminal rounds.
-- [ ] Confirm duplicate recovery is idempotent and does not create duplicate implementer invocations when the next step is already queued.
-- [ ] Implement continuation/settlement pass by reusing `continueRoundAfterInvocation` and `settleRoundAfterInvocation`.
-- [ ] Run focused tests and commit `feat: recover round continuity from sqlite`.
+- [x] Write failing tests for succeeded architect/reviewer/implementer invocations attached to non-terminal rounds.
+- [x] Write failing tests for failed/canceled round-linked invocations attached to non-terminal rounds.
+- [x] Confirm duplicate recovery is idempotent and does not create duplicate implementer invocations when the next step is already queued.
+- [x] Implement continuation/settlement pass by reusing `continueRoundAfterInvocation` and `settleRoundAfterInvocation`.
+- [x] Run focused tests and commit `feat: recover round continuity from sqlite`.
 
 ## Task 4: Host Startup Wiring
 
-- [ ] Extract a small startup helper if needed so Host startup order can be tested without binding a real port.
-- [ ] Add a test or focused verification that recovery runs before worker start.
-- [ ] Wire `apps/host/src/index.ts` to call `await roomHub.recoverThreadContinuity('default-thread')` before `worker.start()`.
-- [ ] Run `pnpm.cmd build` and focused host tests.
-- [ ] Commit `feat: run recovery before host worker start`.
+- [x] Extract a small startup helper if needed so Host startup order can be tested without binding a real port.
+- [x] Add a test or focused verification that recovery runs before worker start.
+- [x] Wire `apps/host/src/index.ts` to call `await roomHub.recoverThreadContinuity('default-thread')` before `worker.start()`.
+- [x] Run `pnpm.cmd build` and focused host tests.
+- [x] Commit `feat: run recovery before host worker start`.
 
 ## Task 5: Verification, Review, Evidence
 
-- [ ] Run full verification:
+- [x] Run full verification:
 
 ```text
 docker compose exec -T redis redis-cli -n 15 FLUSHDB
@@ -63,10 +63,10 @@ python -m unittest tests.test_public_hygiene
 python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
 ```
 
-- [ ] Request independent code review and Vision Gate review.
-- [ ] Fix Critical/Important review findings before closeout.
-- [ ] Create `docs/evidence/EV-013-recovery-session-continuity-2.md`.
-- [ ] Mark F007 complete only after verification and review pass.
+- [x] Request independent code review and Vision Gate review.
+- [x] Fix Critical/Important review findings before closeout.
+- [x] Create `docs/evidence/EV-013-recovery-session-continuity-2.md`.
+- [x] Mark F007 complete only after verification and review pass.
 - [ ] Commit `docs: close recovery session continuity 2`.
 
 ## Self-Review
