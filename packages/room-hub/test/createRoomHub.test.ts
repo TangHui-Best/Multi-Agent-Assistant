@@ -3,6 +3,7 @@ import type { EventBus } from '@multi-agent-assi/event-bus';
 import { createDatabase, createRepositories, type PersistenceRepositories } from '@multi-agent-assi/persistence';
 import type { AgentJob, AgentSeat, InvocationRecord, MessageRecord, RoomEvent, SubmitMessageInput } from '@multi-agent-assi/shared';
 import { createRoomHub } from '../src/createRoomHub.js';
+import { parseReviewerVerdict } from '../src/orchestrationPolicy.js';
 
 function createInput(target: SubmitMessageInput['target']): SubmitMessageInput {
   return {
@@ -106,6 +107,14 @@ function createHarness(agentIds = ['architect', 'reviewer', 'implementer']) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+});
+
+test('parseReviewerVerdict accepts only explicit reviewer verdict lines', () => {
+  expect(parseReviewerVerdict('VERDICT: approved\nNo blocking issues.')).toBe('approved');
+  expect(parseReviewerVerdict(' verdict: approve ')).toBe('approved');
+  expect(parseReviewerVerdict('VERDICT: changes_requested\nMissing failure tests.')).toBe('changes_requested');
+  expect(parseReviewerVerdict('VERDICT: request_changes')).toBe('changes_requested');
+  expect(parseReviewerVerdict('Looks good to me.')).toBeNull();
 });
 
 test('unknown mentioned agent rejects before durable writes or Redis side effects', async () => {
