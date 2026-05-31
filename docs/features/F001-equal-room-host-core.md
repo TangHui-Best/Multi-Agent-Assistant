@@ -61,7 +61,8 @@ None yet
 - [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 记录 Phase 1 skeleton 计划已按 canonical Feature/ADR 重新基线化。
 - [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) records the local Phase 1 skeleton runtime path through Web Console, Host API, Room Hub, SQLite, Redis, mock Agent Runtime, WebSocket, and back to Web Console.
 - [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md) records the first real Codex Adapter Room Hub path and in-process per-agent slot control evidence.
+- [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md) records Redis-backed slot lease integration in Agent Runtime and Event Bus pending/stale recovery.
 
 ## Next Step
 
-按 `docs/superpowers/plans/2026-05-31-codex-adapter-slot-control.md` 收口 Phase 2/3：先让真实 Codex Adapter 通过现有 Room Hub/Invocation/Event Bus/Persistence 主链路运行，再加入多席位与 per-agent slot control。
+Continue closing F001 by making recovery and orchestration visible in the Web Console: round-step status, audit timeline, and resume metadata should be inspectable without moving core state into the frontend.

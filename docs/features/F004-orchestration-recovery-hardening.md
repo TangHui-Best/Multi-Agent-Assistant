@@ -32,6 +32,7 @@ Completed. 主要实现切片已完成并记录在 EV-009；independent review �
 - ADR: [ADR-002 invocation orchestration and recovery contracts](../decisions/ADR-002-invocation-orchestration-recovery-contracts.md)
 - Prior Evidence: [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md)
 - Evidence: [EV-009 orchestration recovery hardening](../evidence/EV-009-orchestration-recovery-hardening.md)
+- Follow-up Evidence: [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md)
 - Implementation plan: [2026-05-31 orchestration recovery hardening](../superpowers/plans/2026-05-31-orchestration-recovery-hardening.md)
 
 ## Acceptance Criteria
@@ -57,7 +58,8 @@ None yet
 ## Evidence
 
 - [EV-009 orchestration recovery hardening](../evidence/EV-009-orchestration-recovery-hardening.md) records implementation slices, verification commands, browser check, independent review findings, recovery path, and residual risks.
+- [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md) records the follow-up that wires Redis leases into Agent Runtime with pending/stale stream recovery.
 
 ## Next Step
 
-Follow-up work can add Web Console round-step visualization and safely wire Redis leases into Agent Runtime after pending-claim/requeue semantics are designed.
+Follow-up work can add Web Console round-step visualization, audit timeline inspection, and broader real Codex session schema samples.
