@@ -226,6 +226,25 @@ test('design_review_execute creates a persisted round and queues only the archit
   expect(events.map((event) => event.type)).toContain('round.created');
 });
 
+test('continueRoundAfterInvocation queues reviewer then implementer and completes the round', async () => {
+  const { invocations, jobs, repositories, roomHub, roundSteps, rounds } = createHarness(['architect', 'reviewer', 'implementer']);
+  await roomHub.submitMessage(createInput({ mode: 'orchestrated', workflow: 'design_review_execute' }));
+  const architectInvocation = invocations[0];
+
+  const reviewerInvocation = await roomHub.continueRoundAfterInvocation(architectInvocation.id);
+  expect(reviewerInvocation).toMatchObject({ agentId: 'reviewer', roundId: rounds[0].id, roundStepId: roundSteps[1].id });
+  expect(jobs.map((job) => job.agentId)).toEqual(['architect', 'reviewer']);
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[0].id, 'succeeded', { invocationId: architectInvocation.id });
+  expect(repositories.updateRoundStepStatus).toHaveBeenCalledWith(roundSteps[1].id, 'queued', { invocationId: reviewerInvocation?.id });
+
+  const implementerInvocation = await roomHub.continueRoundAfterInvocation(reviewerInvocation!.id);
+  expect(implementerInvocation).toMatchObject({ agentId: 'implementer', roundId: rounds[0].id, roundStepId: roundSteps[2].id });
+
+  const done = await roomHub.continueRoundAfterInvocation(implementerInvocation!.id);
+  expect(done).toBeNull();
+  expect(repositories.updateRoundStatus).toHaveBeenCalledWith(rounds[0].id, 'succeeded');
+});
+
 test('same idempotency key returns the original message and invocations without duplicate jobs', async () => {
   const repositories = createRepositories(createDatabase(':memory:'));
   repositories.ensureDefaultState();

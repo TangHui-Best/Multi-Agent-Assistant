@@ -16,7 +16,9 @@ function createJob(overrides: Partial<AgentJob> = {}): AgentJob {
   };
 }
 
-function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jobs?: Array<{ streamId: string; job: AgentJob }> } = {}) {
+function createHarness(
+  options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jobs?: Array<{ streamId: string; job: AgentJob }>; timeoutMs?: number } = {},
+) {
   const messages: MessageRecord[] = [];
   const events: RoomEvent[] = [];
   const statusUpdates: Array<{ id: string; status: InvocationRecord['status']; error?: string }> = [];
@@ -95,6 +97,7 @@ function createHarness(options: { seat?: AgentSeat; adapter?: RuntimeAdapter; jo
       adapters: options.adapter ? [options.adapter] : [],
       consumerGroup: 'runtime-workers',
       pollIntervalMs: 60_000,
+      timeoutMs: options.timeoutMs,
     }),
   };
 }
@@ -262,6 +265,75 @@ test('aborts a running adapter when a matching invocation cancellation event arr
   expect(receivedSignal?.aborted).toBe(true);
   expect(repositories.updateInvocationStatus).toHaveBeenCalledWith(job.invocationId, 'running');
   expect(repositories.updateInvocationStatus).not.toHaveBeenCalledWith(job.invocationId, 'failed', expect.anything());
+});
+
+test('does not overwrite a canceled invocation when an adapter ignores abort and resolves late', async () => {
+  const job = createJob();
+  let resolveStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => {
+      resolveStarted?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { body: 'late success' };
+    }),
+  };
+  const { acknowledgements, messages, publishRoomEventToWorker, repositories, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+
+  worker.start();
+  await started;
+  vi.mocked(repositories.getInvocation).mockReturnValue({
+    id: job.invocationId,
+    roomId: job.roomId,
+    threadId: job.threadId,
+    sourceMessageId: job.sourceMessageId,
+    agentId: job.agentId,
+    status: 'canceled',
+    createdAt: 1,
+    updatedAt: 2,
+  });
+  publishRoomEventToWorker({
+    type: 'invocation.canceled',
+    roomId: job.roomId,
+    threadId: job.threadId,
+    invocationId: job.invocationId,
+    agentId: job.agentId,
+    occurredAt: 2,
+  });
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(messages).toEqual([]);
+  expect(repositories.updateInvocationStatus).not.toHaveBeenCalledWith(job.invocationId, 'succeeded');
+});
+
+test('times out a runtime adapter through the shared worker contract', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(() => new Promise(() => {})),
+  };
+  const { acknowledgements, events, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+    timeoutMs: 10,
+  });
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(statusUpdates).toEqual([
+    { id: job.invocationId, status: 'running', error: undefined },
+    { id: job.invocationId, status: 'failed', error: 'Invocation timed out after 10ms' },
+  ]);
+  expect(events).toContainEqual(expect.objectContaining({ type: 'invocation.failed', error: 'Invocation timed out after 10ms' }));
 });
 
 test('fails and acks only the current invocation when no adapter exists for the seat runtime', async () => {

@@ -13,6 +13,8 @@ export interface RuntimeAdapterRunContext {
   job: AgentJob;
   seat: AgentSeat;
   signal: AbortSignal;
+  timeoutMs: number;
+  deadlineAt: number;
   emitDelta(delta: string): Promise<void>;
 }
 
@@ -90,12 +92,35 @@ function findAdapter(adapters: Map<RuntimeKind, RuntimeAdapter>, kind: RuntimeKi
   return adapter;
 }
 
+async function runAdapterWithTimeout(
+  adapter: RuntimeAdapter,
+  context: RuntimeAdapterRunContext,
+  abortController: AbortController,
+): Promise<RuntimeAdapterRunResult> {
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      abortController.abort(new Error(`Invocation timed out after ${context.timeoutMs}ms`));
+      reject(new Error(`Invocation timed out after ${context.timeoutMs}ms`));
+    }, context.timeoutMs);
+  });
+  try {
+    return await Promise.race([adapter.run(context), timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 async function processJob(
   deps: {
     repositories: PersistenceRepositories;
     eventBus: EventBus;
     adapters: Map<RuntimeKind, RuntimeAdapter>;
     abortControllers: Map<string, AbortController>;
+    timeoutMs: number;
+    onInvocationSucceeded?: (invocationId: string) => Promise<void>;
   },
   streamId: string,
   job: AgentJob,
@@ -111,6 +136,7 @@ async function processJob(
     const adapter = findAdapter(deps.adapters, seat.runtime.kind);
     const abortController = new AbortController();
     deps.abortControllers.set(job.invocationId, abortController);
+    const deadlineAt = Date.now() + deps.timeoutMs;
 
     deps.repositories.updateInvocationStatus(job.invocationId, 'running');
     appendInvocationAudit(deps.repositories, job.invocationId, 'invocation.running');
@@ -123,22 +149,32 @@ async function processJob(
       occurredAt: Date.now(),
     });
 
-    const result = await adapter.run({
-      job,
-      seat,
-      signal: abortController.signal,
-      emitDelta: async (delta) => {
-        await deps.eventBus.publishRoomEvent({
-          type: 'agent.delta',
-          roomId: job.roomId,
-          threadId: job.threadId,
-          invocationId: job.invocationId,
-          agentId: job.agentId,
-          delta,
-          occurredAt: Date.now(),
-        });
+    const result = await runAdapterWithTimeout(
+      adapter,
+      {
+        job,
+        seat,
+        signal: abortController.signal,
+        timeoutMs: deps.timeoutMs,
+        deadlineAt,
+        emitDelta: async (delta) => {
+          await deps.eventBus.publishRoomEvent({
+            type: 'agent.delta',
+            roomId: job.roomId,
+            threadId: job.threadId,
+            invocationId: job.invocationId,
+            agentId: job.agentId,
+            delta,
+            occurredAt: Date.now(),
+          });
+        },
       },
-    });
+      abortController,
+    );
+
+    if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
+      return;
+    }
 
     if (result.runtimeSessionId || result.resumeMetadata) {
       deps.repositories.updateInvocationRecoveryMetadata(job.invocationId, {
@@ -175,6 +211,7 @@ async function processJob(
       message,
       occurredAt: Date.now(),
     });
+    await deps.onInvocationSucceeded?.(job.invocationId);
   } catch (err) {
     if (!durableSuccess) {
       if (deps.repositories.getInvocation(job.invocationId)?.status === 'canceled') {
@@ -195,6 +232,8 @@ export function createAgentWorker(deps: {
   adapters: RuntimeAdapter[];
   consumerGroup?: string;
   pollIntervalMs?: number;
+  timeoutMs?: number;
+  onInvocationSucceeded?: (invocationId: string) => Promise<void>;
 }): AgentWorker {
   let stopped = true;
   let timer: NodeJS.Timeout | null = null;
@@ -205,11 +244,19 @@ export function createAgentWorker(deps: {
   const consumerName = `worker-${process.pid}`;
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.kind, adapter]));
   const abortControllers = new Map<string, AbortController>();
+  const timeoutMs = deps.timeoutMs ?? 300_000;
 
   async function processJobGroup(group: AgentJobEnvelope[]): Promise<void> {
     for (const { streamId, job } of group) {
       if (stopped) return;
-      await processJob({ repositories: deps.repositories, eventBus: deps.eventBus, adapters, abortControllers }, streamId, job);
+      await processJob({
+        repositories: deps.repositories,
+        eventBus: deps.eventBus,
+        adapters,
+        abortControllers,
+        timeoutMs,
+        onInvocationSucceeded: deps.onInvocationSucceeded,
+      }, streamId, job);
       await deps.eventBus.ackAgentJob(consumerGroup, streamId);
     }
   }

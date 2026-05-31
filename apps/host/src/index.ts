@@ -20,6 +20,7 @@ const worker = createAgentWorker({
   repositories,
   eventBus,
   adapters: [createMockRuntimeAdapter(), createCodexCliAdapter()],
+  onInvocationSucceeded: (invocationId) => roomHub.continueRoundAfterInvocation(invocationId).then(() => undefined),
 });
 worker.start();
 

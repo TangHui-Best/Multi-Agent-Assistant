@@ -6,6 +6,7 @@ import type { AgentId, AgentJob, InvocationRecord, MessageRecord, RoundRecord, R
 export interface RoomHub {
   submitMessage(input: SubmitMessageInput): Promise<{ message: MessageRecord; invocations: InvocationRecord[] }>;
   cancelInvocation(invocationId: string, reason?: string): Promise<InvocationRecord>;
+  continueRoundAfterInvocation(invocationId: string): Promise<InvocationRecord | null>;
   listMessages(threadId: string): Promise<MessageRecord[]>;
 }
 
@@ -83,6 +84,24 @@ async function failInvocationsFrom(
   for (const invocation of invocations.slice(startIndex)) {
     await publishInvocationFailed(deps, invocation, error);
   }
+}
+
+async function publishAndEnqueueInvocation(deps: { eventBus: EventBus }, invocation: InvocationRecord, prompt: string): Promise<void> {
+  await deps.eventBus.publishRoomEvent({
+    type: 'invocation.queued',
+    roomId: invocation.roomId,
+    threadId: invocation.threadId,
+    invocation,
+    occurredAt: Date.now(),
+  });
+  await deps.eventBus.enqueueAgentJob({
+    invocationId: invocation.id,
+    roomId: invocation.roomId,
+    threadId: invocation.threadId,
+    sourceMessageId: invocation.sourceMessageId,
+    agentId: invocation.agentId,
+    prompt,
+  });
 }
 
 function createInvocation(input: {
@@ -231,14 +250,6 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
       }
 
       for (const [index, invocation] of invocations.entries()) {
-        const job: AgentJob = {
-          invocationId: invocation.id,
-          roomId: input.roomId,
-          threadId: input.threadId,
-          sourceMessageId: message.id,
-          agentId: invocation.agentId,
-          prompt: input.body,
-        };
         try {
           await deps.eventBus.publishRoomEvent({
             type: 'invocation.queued',
@@ -252,7 +263,14 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
           throw err;
         }
         try {
-          await deps.eventBus.enqueueAgentJob(job);
+          await deps.eventBus.enqueueAgentJob({
+            invocationId: invocation.id,
+            roomId: input.roomId,
+            threadId: input.threadId,
+            sourceMessageId: message.id,
+            agentId: invocation.agentId,
+            prompt: input.body,
+          });
         } catch (err) {
           await failInvocationsFrom(deps, invocations, index, getErrorMessage(err));
           throw err;
@@ -288,6 +306,62 @@ export function createRoomHub(deps: { repositories: PersistenceRepositories; eve
         occurredAt: Date.now(),
       });
       return canceled;
+    },
+
+    async continueRoundAfterInvocation(invocationId) {
+      const completedInvocation = deps.repositories.getInvocation(invocationId);
+      if (!completedInvocation?.roundId || !completedInvocation.roundStepId) {
+        return null;
+      }
+
+      const steps = deps.repositories.listRoundSteps(completedInvocation.roundId);
+      const currentStep = steps.find((step) => step.id === completedInvocation.roundStepId);
+      if (!currentStep) {
+        throw new Error(`Round step not found for invocation: ${invocationId}`);
+      }
+      deps.repositories.updateRoundStepStatus(currentStep.id, 'succeeded', { invocationId: completedInvocation.id });
+
+      const nextStep = steps.find((step) => step.dependsOnStepId === currentStep.id && step.status === 'pending');
+      if (!nextStep) {
+        deps.repositories.updateRoundStatus(completedInvocation.roundId, 'succeeded');
+        return null;
+      }
+
+      const threadMessages = deps.repositories.listMessages(completedInvocation.threadId);
+      const sourceMessage = threadMessages.find((message) => message.id === completedInvocation.sourceMessageId);
+      if (!sourceMessage) {
+        throw new Error(`Source message not found: ${completedInvocation.sourceMessageId}`);
+      }
+      const previousMessage = threadMessages.find((message) => message.invocationId === completedInvocation.id);
+      const prompt = previousMessage
+        ? `Original request:\n${sourceMessage.body}\n\nPrevious ${completedInvocation.agentId} output:\n${previousMessage.body}`
+        : sourceMessage.body;
+      const nextInvocation = createInvocation({
+        message: sourceMessage,
+        agentId: nextStep.agentId,
+        now: Date.now(),
+        roundId: completedInvocation.roundId,
+        roundStepId: nextStep.id,
+      });
+      deps.repositories.createInvocation(nextInvocation);
+      deps.repositories.appendInvocationAudit({
+        id: randomUUID(),
+        invocationId: nextInvocation.id,
+        eventType: 'invocation.queued',
+        occurredAt: Date.now(),
+        metadata: { roundId: completedInvocation.roundId, roundStepId: nextStep.id },
+      });
+      deps.repositories.updateRoundStepStatus(nextStep.id, 'queued', { invocationId: nextInvocation.id });
+      try {
+        await publishAndEnqueueInvocation(deps, nextInvocation, prompt);
+      } catch (err) {
+        const error = getErrorMessage(err);
+        await publishInvocationFailed(deps, nextInvocation, error);
+        deps.repositories.updateRoundStepStatus(nextStep.id, 'failed', { invocationId: nextInvocation.id, error });
+        deps.repositories.updateRoundStatus(completedInvocation.roundId, 'failed', error);
+        throw err;
+      }
+      return nextInvocation;
     },
 
     async listMessages(threadId) {

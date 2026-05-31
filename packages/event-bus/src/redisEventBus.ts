@@ -109,10 +109,12 @@ export function createRedisEventBus(redisUrl: string): EventBus {
 
     async releaseAgentSlotLease(agentId, ownerId) {
       const key = `${AGENT_SLOT_LEASE_PREFIX}${agentId}`;
-      const currentOwner = await redis.get(key);
-      if (currentOwner === ownerId) {
-        await redis.del(key);
-      }
+      await redis.eval(
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+        1,
+        key,
+        ownerId,
+      );
     },
 
     async subscribeRoomEvents(onEvent) {

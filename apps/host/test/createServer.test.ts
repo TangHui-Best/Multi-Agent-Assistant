@@ -81,6 +81,7 @@ function createHarness() {
       return { message, invocations: [invocation] };
     }),
     listMessages: vi.fn(async () => messages),
+    continueRoundAfterInvocation: vi.fn(async () => null),
     cancelInvocation: vi.fn(async (invocationId: string, reason?: string) => ({
       id: invocationId,
       roomId: 'default-room',

@@ -6,6 +6,7 @@ const redisInstances: FakeRedis[] = [];
 
 class FakeRedis extends EventEmitter {
   xgroupCalls: unknown[][] = [];
+  evalCalls: unknown[][] = [];
   xreadgroupResponse: unknown = null;
   subscribeCalls = 0;
   unsubscribeCalls = 0;
@@ -48,6 +49,13 @@ class FakeRedis extends EventEmitter {
   async del(key: string): Promise<number> {
     const existed = this.keys.delete(key);
     return existed ? 1 : 0;
+  }
+
+  async eval(_script: string, keyCount: number, key: string, ownerId: string): Promise<number> {
+    this.evalCalls.push([keyCount, key, ownerId]);
+    if (this.keys.get(key) !== ownerId) return 0;
+    this.keys.delete(key);
+    return 1;
   }
 
   async subscribe(): Promise<void> {
@@ -137,5 +145,6 @@ test('agent slot leases are exclusive until released by the owner', async () => 
   await eventBus.releaseAgentSlotLease('architect', 'worker-2');
   await expect(eventBus.acquireAgentSlotLease('architect', 'worker-2', 30_000)).resolves.toBe(false);
   await eventBus.releaseAgentSlotLease('architect', 'worker-1');
+  expect(redisInstances[0].evalCalls).toContainEqual([1, 'mas:agent-slot-lease:architect', 'worker-1']);
   await expect(eventBus.acquireAgentSlotLease('architect', 'worker-2', 30_000)).resolves.toBe(true);
 });
