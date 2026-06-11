@@ -1,0 +1,19 @@
+{
+  "name": "@multi-agent-assi/connector-interface",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@multi-agent-assi/room-hub": "workspace:*",
+    "@multi-agent-assi/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.8"
+  }
+}

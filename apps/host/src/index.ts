@@ -24,7 +24,7 @@ const worker = createAgentWorker({
   onInvocationSucceeded: (invocationId) => roomHub.continueRoundAfterInvocation(invocationId).then(() => undefined),
   onInvocationFailed: (invocationId, error) => roomHub.settleRoundAfterInvocation(invocationId, 'failed', error),
 });
-await recoverBeforeWorkerStart({ roomHub, worker, threadId: 'default-thread' });
+await recoverBeforeWorkerStart({ roomHub, worker, threadIds: repositories.listThreadIds() });
 
 const server = await createServer({ repositories, eventBus, roomHub });
 

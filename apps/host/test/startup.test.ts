@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { recoverBeforeWorkerStart } from '../src/startup.js';
 
 describe('host startup recovery', () => {
-  it('runs recovery before starting the worker', async () => {
+  it('runs recovery for each persisted thread before starting the worker', async () => {
     const order: string[] = [];
     const roomHub = {
-      recoverThreadContinuity: vi.fn(async () => {
-        order.push('recover');
+      recoverThreadContinuity: vi.fn(async (threadId: string) => {
+        order.push(`recover:${threadId}`);
       }),
     };
     const worker = {
@@ -15,10 +15,11 @@ describe('host startup recovery', () => {
       }),
     };
 
-    await recoverBeforeWorkerStart({ roomHub, worker, threadId: 'default-thread' });
+    await recoverBeforeWorkerStart({ roomHub, worker, threadIds: ['default-thread', 'review-thread'] });
 
-    expect(roomHub.recoverThreadContinuity).toHaveBeenCalledWith('default-thread');
+    expect(roomHub.recoverThreadContinuity).toHaveBeenNthCalledWith(1, 'default-thread');
+    expect(roomHub.recoverThreadContinuity).toHaveBeenNthCalledWith(2, 'review-thread');
     expect(worker.start).toHaveBeenCalled();
-    expect(order).toEqual(['recover', 'start']);
+    expect(order).toEqual(['recover:default-thread', 'recover:review-thread', 'start']);
   });
 });

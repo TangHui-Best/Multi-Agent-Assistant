@@ -73,6 +73,15 @@ describe('persistence repositories', () => {
     expect(repositories.listInvocationsByThread('default-thread').map((invocation) => invocation.id)).toEqual(['invocation-1']);
   });
 
+  it('lists persisted thread ids for startup recovery', () => {
+    const db = createDatabase(':memory:');
+    const repositories = createRepositories(db);
+    repositories.ensureDefaultState();
+    db.prepare('insert into threads (id, room_id, title, created_at) values (?, ?, ?, ?)').run('review-thread', 'default-room', 'Review Thread', 2);
+
+    expect(repositories.listThreadIds()).toEqual(['default-thread', 'review-thread']);
+  });
+
   it('migrates legacy message tables before creating the idempotency index', () => {
     const db = new Database(':memory:');
     db.exec(`

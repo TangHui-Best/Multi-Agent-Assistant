@@ -11,6 +11,7 @@ import type {
 
 export interface PersistenceRepositories {
   ensureDefaultState(options?: { runtimeKind?: RuntimeKind }): void;
+  listThreadIds(): string[];
   appendMessage(message: MessageRecord, options?: { idempotencyKey?: string }): void;
   findMessageByIdempotencyKey(roomId: string, threadId: string, idempotencyKey: string): MessageRecord | null;
   listMessages(threadId: string): MessageRecord[];
@@ -178,6 +179,13 @@ export function createRepositories(db: Database.Database): PersistenceRepositori
       insertAgent.run('architect', 'Architect', 'architect', JSON.stringify({ kind: runtimeKind, profile: 'architect' }));
       insertAgent.run('reviewer', 'Reviewer', 'reviewer', JSON.stringify({ kind: runtimeKind, profile: 'reviewer' }));
       insertAgent.run('implementer', 'Implementer', 'implementer', JSON.stringify({ kind: runtimeKind, profile: 'implementer' }));
+    },
+
+    listThreadIds() {
+      return db
+        .prepare('select id from threads order by id asc')
+        .all()
+        .map((row) => (row as { id: string }).id);
     },
 
     appendMessage(message, options) {

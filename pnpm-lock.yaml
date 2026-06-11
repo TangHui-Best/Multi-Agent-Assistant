@@ -88,6 +88,19 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/connector-interface:
+    dependencies:
+      '@multi-agent-assi/room-hub':
+        specifier: workspace:*
+        version: link:../room-hub
+      '@multi-agent-assi/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      vitest:
+        specifier: ^3.0.8
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+
   packages/event-bus:
     dependencies:
       '@multi-agent-assi/shared':
