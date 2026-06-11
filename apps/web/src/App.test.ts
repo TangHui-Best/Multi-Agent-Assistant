@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { InvocationRecord, MessageRecord, RoomEvent, RoundRecord, RoundStepRecord } from '@multi-agent-assi/shared';
 import type { BootstrapState } from './api.js';
+import App from './App.js';
 import {
   auditRefreshKey,
   createAuditLoadingState,
@@ -47,6 +50,18 @@ describe('mergeRoomEvent', () => {
     const final = mergeRoomEvent(duplicate, completed);
 
     expect(final.map((item) => item.id)).toEqual(['msg-1', 'msg-2']);
+  });
+});
+
+describe('productized room workbench shell', () => {
+  it('renders the required room workbench regions', () => {
+    const markup = renderToStaticMarkup(createElement(App));
+
+    expect(markup).toContain('aria-label="成员与席位"');
+    expect(markup).toContain('aria-label="线程时间线"');
+    expect(markup).toContain('aria-label="Round 进度"');
+    expect(markup).toContain('aria-label="Invocation 与恢复详情"');
+    expect(markup).toContain('aria-label="任务 Composer"');
   });
 });
 

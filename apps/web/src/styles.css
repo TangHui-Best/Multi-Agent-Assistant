@@ -55,6 +55,13 @@ h1 {
   line-height: 1.2;
 }
 
+.section-note {
+  max-width: 24ch;
+  margin: 8px 0 0;
+  color: oklch(45% 0.02 255);
+  font-size: 0.88rem;
+}
+
 h2 {
   font-size: 1.15rem;
 }

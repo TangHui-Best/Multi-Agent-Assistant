@@ -163,12 +163,12 @@ export function auditRefreshKey(invocation: InvocationRecord | undefined): strin
 
 function senderLabel(message: MessageRecord): string {
   if (message.sender.type === 'agent') return message.sender.agentId;
-  if (message.sender.type === 'user') return 'you';
-  return 'system';
+  if (message.sender.type === 'user') return '你';
+  return '系统';
 }
 
 function seatStatus(seat: AgentSeat): string {
-  return `${seat.role} · ${seat.runtime.kind}`;
+  return `${seat.role} / ${seat.runtime.kind}`;
 }
 
 function latestInvocationForSeat(invocations: InvocationRecord[], agentId: string): InvocationRecord | undefined {
@@ -269,10 +269,11 @@ export default function App() {
 
   return (
     <main className="room-shell">
-      <aside className="roster" aria-label="Room members">
+      <aside className="roster" aria-label="成员与席位">
         <div>
-          <p className="eyebrow">Room</p>
+          <p className="eyebrow">房间</p>
           <h1>Equal-Room Host</h1>
+          <p className="section-note">本地主机上的平等协作席位</p>
         </div>
         <div className="seat-list">
           {agents.map((agent) => (
@@ -293,10 +294,10 @@ export default function App() {
         </div>
       </aside>
 
-      <section className="thread" aria-label="Thread timeline">
+      <section className="thread" aria-label="线程时间线">
         <header className="thread-header">
           <div>
-            <p className="eyebrow">Thread</p>
+            <p className="eyebrow">线程</p>
             <h2>default-thread</h2>
           </div>
           <span className="status">{status}</span>
@@ -304,15 +305,15 @@ export default function App() {
 
         <div className="workbench">
           <div className="main-column">
-            <section className="round-panel" aria-label="Round progress">
+            <section className="round-panel" aria-label="Round 进度">
               <div className="panel-header">
                 <div>
-                  <p className="eyebrow">Rounds</p>
+                  <p className="eyebrow">Round 进度</p>
                   <h3>design review</h3>
                 </div>
               </div>
               {roundProjection.rounds.length === 0 ? (
-                <p className="subtle">No controlled rounds yet.</p>
+                <p className="subtle">还没有受控 review round。</p>
               ) : (
                 roundProjection.rounds.map((round) => (
                   <article className="round-card" key={round.id}>
@@ -350,9 +351,9 @@ export default function App() {
               )}
             </section>
 
-            <div className="timeline">
+            <section className="timeline" aria-label="线程消息">
               {visibleMessages.length === 0 ? (
-                <div className="empty-state">Start with a focused task or review request.</div>
+                <div className="empty-state">从一个明确任务或 review 请求开始。</div>
               ) : (
                 visibleMessages.map((message) => (
                   <article className={`message ${message.sender.type}`} key={message.id}>
@@ -364,14 +365,14 @@ export default function App() {
                   </article>
                 ))
               )}
-            </div>
+            </section>
           </div>
 
-          <aside className="recovery-panel" aria-label="Recovery detail">
+          <aside className="recovery-panel" aria-label="Invocation 与恢复详情">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Recovery</p>
-                <h3>{selectedInvocation?.agentId ?? 'No invocation selected'}</h3>
+                <p className="eyebrow">恢复</p>
+                <h3>{selectedInvocation?.agentId ?? '未选择 invocation'}</h3>
               </div>
             </div>
             {selectedInvocation ? (
@@ -379,12 +380,12 @@ export default function App() {
                 <dl>
                   <dt>Invocation</dt>
                   <dd>{selectedInvocation.id}</dd>
-                  <dt>Status</dt>
+                  <dt>状态</dt>
                   <dd>{selectedInvocation.status}</dd>
-                  <dt>Source message</dt>
+                  <dt>来源消息</dt>
                   <dd>{selectedInvocation.sourceMessageId}</dd>
                   <dt>Runtime session</dt>
-                  <dd>{selectedInvocation.runtimeSessionId ?? 'No session captured'}</dd>
+                  <dd>{selectedInvocation.runtimeSessionId ?? '未捕获 session'}</dd>
                 </dl>
                 <pre>{formatRecoveryMetadata(selectedInvocation.resumeMetadata)}</pre>
                 <div className="audit-list">
@@ -398,16 +399,16 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <p className="subtle">Select a round step to inspect recovery facts.</p>
+              <p className="subtle">选择一个 round step 查看恢复事实。</p>
             )}
           </aside>
         </div>
 
-        <form className="composer" onSubmit={onSubmit}>
-          <label htmlFor="message">Task</label>
+        <form className="composer" aria-label="任务 Composer" onSubmit={onSubmit}>
+          <label htmlFor="message">任务</label>
           <div className="composer-row">
             <textarea id="message" value={body} onChange={(event) => setBody(event.target.value)} rows={3} />
-            <button type="submit">Send</button>
+            <button type="submit">发送</button>
           </div>
         </form>
       </section>
