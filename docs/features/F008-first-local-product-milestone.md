@@ -49,7 +49,7 @@ Completed.
 
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| F008.1 | 2026-06-12 | pending closeout commit | Redis stream could contain a job whose invocation no longer exists in the current SQLite persistence, causing a worker to keep seeing an unprocessable stale job. | Redis is runtime coordination, while SQLite is the persistent fact source; old stream entries can outlive an in-memory or reset persistence state. | `packages/agent-runtime/test/agentWorker.test.ts` covers missing-invocation stale jobs and asserts they are acked without acquiring a slot lease or running an adapter. | completed |
+| F008.1 | 2026-06-12 | 3dbec81 | Redis stream could contain a job whose invocation no longer exists in the current SQLite persistence, causing a worker to keep seeing an unprocessable stale job. | Redis is runtime coordination, while SQLite is the persistent fact source; old stream entries can outlive an in-memory or reset persistence state. | `packages/agent-runtime/test/agentWorker.test.ts` covers missing-invocation stale jobs and asserts they are acked without acquiring a slot lease or running an adapter. | completed |
 
 ## Evidence
 

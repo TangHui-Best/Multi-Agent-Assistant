@@ -32,9 +32,10 @@ This evidence does not claim completion for a full Feishu connector, Claude Code
 ```text
 0a395ea feat: add connector ingress and recover persisted threads
 fc52314 feat: productize room workbench shell
+3dbec81 fix: close local milestone recovery gap
 ```
 
-The closeout batch containing stale Redis job recovery and F008/F009/F010/F011 documentation updates is identified by the commit that adds or updates this evidence.
+The closeout batch contains stale Redis job recovery and F008/F009/F010/F011 documentation updates.
 
 ## Results
 
