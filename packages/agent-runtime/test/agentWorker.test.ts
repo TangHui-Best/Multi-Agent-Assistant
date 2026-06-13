@@ -16,6 +16,19 @@ function createJob(overrides: Partial<AgentJob> = {}): AgentJob {
   };
 }
 
+function createInvocation(id: string, status: InvocationRecord['status'] = 'queued'): InvocationRecord {
+  return {
+    id,
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-1',
+    agentId: 'architect',
+    status,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
 function createHarness(
   options: {
     seat?: AgentSeat;
@@ -65,7 +78,7 @@ function createHarness(
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
-    getInvocation: vi.fn(() => null),
+    getInvocation: vi.fn((invocationId: string) => createInvocation(invocationId)),
     listAgents: vi.fn(() => [seat]),
   };
   const eventBus: EventBus = {
@@ -571,6 +584,28 @@ test('acks without running when queued to running transition is rejected by pers
   await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
   await worker.stop();
 
+  expect(adapter.run).not.toHaveBeenCalled();
+  expect(statusUpdates).toEqual([]);
+});
+
+test('acks stale Redis jobs whose invocation no longer exists in persistence', async () => {
+  const job = createJob();
+  const adapter: RuntimeAdapter = {
+    kind: 'codex-cli',
+    run: vi.fn(async () => ({ body: 'should not run' })),
+  };
+  const { acknowledgements, eventBus, repositories, statusUpdates, worker } = createHarness({
+    adapter,
+    jobs: [{ streamId: 'stream-1', job }],
+  });
+  vi.mocked(repositories.tryStartInvocation).mockReturnValue(false);
+  vi.mocked(repositories.getInvocation).mockReturnValue(null);
+
+  worker.start();
+  await vi.waitFor(() => expect(acknowledgements).toEqual([{ consumerGroup: 'runtime-workers', streamId: 'stream-1' }]));
+  await worker.stop();
+
+  expect(eventBus.acquireAgentSlotLease).not.toHaveBeenCalled();
   expect(adapter.run).not.toHaveBeenCalled();
   expect(statusUpdates).toEqual([]);
 });

@@ -24,6 +24,19 @@ function createJob(overrides: Partial<AgentJob> = {}): AgentJob {
   };
 }
 
+function createInvocation(id: string, status: InvocationRecord['status'] = 'queued'): InvocationRecord {
+  return {
+    id,
+    roomId: 'room-1',
+    threadId: 'thread-1',
+    sourceMessageId: 'message-1',
+    agentId: 'architect',
+    status,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
 function createHarness(
   options: {
     jobs?: Array<{ streamId: string; job: AgentJob }>;
@@ -64,7 +77,7 @@ function createHarness(
     updateInvocationStatus: vi.fn((id: string, status: InvocationRecord['status'], error?: string) => {
       statusUpdates.push({ id, status, error });
     }),
-    getInvocation: vi.fn(() => null),
+    getInvocation: vi.fn((invocationId: string) => createInvocation(invocationId)),
     listAgents: vi.fn((): AgentSeat[] => agents),
   };
   const eventBus: EventBus = {

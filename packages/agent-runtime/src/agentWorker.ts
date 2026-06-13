@@ -270,6 +270,10 @@ export function createAgentWorker(deps: {
 
   async function processJobWithSlotLease(streamId: string, job: AgentJob): Promise<boolean> {
     const initialStatus = getInvocationStatus(deps.repositories, job.invocationId);
+    if (initialStatus === undefined) {
+      await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+      return true;
+    }
     if (isTerminalInvocationStatus(initialStatus)) {
       await deps.eventBus.ackAgentJob(consumerGroup, streamId);
       return true;
@@ -282,6 +286,10 @@ export function createAgentWorker(deps: {
 
     try {
       const leasedStatus = getInvocationStatus(deps.repositories, job.invocationId);
+      if (leasedStatus === undefined) {
+        await deps.eventBus.ackAgentJob(consumerGroup, streamId);
+        return true;
+      }
       if (isTerminalInvocationStatus(leasedStatus)) {
         await deps.eventBus.ackAgentJob(consumerGroup, streamId);
         return true;
