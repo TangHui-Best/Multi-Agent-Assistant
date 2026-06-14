@@ -3,7 +3,7 @@ id: F003
 doc_kind: feature
 status: completed
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-06-14
 ---
 
 # F003: Public Hygiene Gate
@@ -19,6 +19,19 @@ updated: 2026-05-26
 - 期望结果：`scripts/public_hygiene.py`、`.public-hygiene/forbidden-patterns.txt`、`.public-hygiene/forbidden-patterns.local.txt`、`PUBLIC_HYGIENE_FORBIDDEN_PATTERNS` 和 GitHub Actions 共同覆盖 tracked files、repository-relative paths、commit messages，并且失败输出脱敏。
 - 非目标或边界：公开 denylist 不提交真实私有标识；generic phrase `private local reference` 保持允许。
 - Exit Gate 对照来源：本 Feature 的验收标准和 EV-003。
+
+## Feature Intake
+
+- Original problem: 公开仓库必须保持本项目身份，不泄漏本地参考来源、私有路径或不合适隐喻。
+- User pain point: 一旦公开文档、包元数据或 UI 混入参考标识，会破坏项目独立性和后续发布可信度。
+- Capability promise: 提供可运行 public hygiene 检查，约束公开 tracked 文件。
+- Non-goals: 不扫描未跟踪的本地私有笔记；不替代架构 review。
+- Acceptance source: F003 acceptance criteria and public hygiene test evidence。
+- Open questions: 规则词表可按新发现的泄漏风险继续扩展。
+
+## Capability Contract
+
+- Public hygiene gate 检查公开 tracked 文件中的参考品牌、fork 痕迹、宠物隐喻和本地路径泄漏风险。
 
 ## Current Status
 
@@ -41,6 +54,18 @@ Completed. The implemented gate was recorded on 2026-05-25, local review-hardeni
 - [x] Public committed denylist contains no real private reference identifiers.
 - [x] Remote GitHub Actions run has been observed after push.
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| Public hygiene gate protects source-neutral identity | Feature acceptance criteria | EV-003 public hygiene gate; current python -m unittest tests.test_public_hygiene | active guardrail |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | active guardrail | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
@@ -53,6 +78,14 @@ Completed. The implemented gate was recorded on 2026-05-25, local review-hardeni
 - [EV-003 public hygiene gate](../evidence/EV-003-public-hygiene-gate.md) records local unit, scanner, env-rule, commit-message, path-scan, and Harness validation evidence from the original gate implementation.
 - [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) records current strict Harness validator compatibility after migration.
 - [EV-005 public hygiene remote actions](../evidence/EV-005-public-hygiene-remote-actions.md) records the observed remote GitHub Actions success for Public Hygiene run `#3`.
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: active guardrail.
+- Known risks: 当前 scripts/public_hygiene.py 报告 0 rule(s) loaded，需要后续确认规则文件加载是否仍符合预期。
+- Next safe action: 新增公开文档或 UI 后运行 public hygiene 检查。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 

@@ -257,7 +257,7 @@ docker compose exec -T redis redis-cli -n 15 FLUSHDB
 $env:REDIS_URL='redis://127.0.0.1:6379/15'; pnpm.cmd test
 pnpm.cmd build
 python -m unittest tests.test_public_hygiene
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 - [ ] **Step 2: Record Evidence**
@@ -273,7 +273,7 @@ Mark F006 acceptance criteria complete only for verified behavior and link EV-01
 Run:
 
 ```text
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 - [ ] **Step 5: Commit**

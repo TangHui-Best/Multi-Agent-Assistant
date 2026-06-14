@@ -23,7 +23,7 @@ python scripts/public_hygiene.py --root .
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<secret pattern not committed to this repository>'; python scripts/public_hygiene.py --root .
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<commit subject pattern not committed to this repository>'; python scripts/public_hygiene.py --root . --commit-range HEAD
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<secret pattern not committed to this repository>'; python scripts/public_hygiene.py --root . --require-rules --require-env-rules --require-commit-range --commit-range origin/main..HEAD
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs
 ```
 
 ## Results

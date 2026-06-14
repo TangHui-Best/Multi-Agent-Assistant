@@ -3,7 +3,7 @@ id: F008
 doc_kind: feature
 status: completed
 created: 2026-06-11
-updated: 2026-06-12
+updated: 2026-06-14
 ---
 
 # F008: First Local Product Milestone
@@ -19,6 +19,19 @@ updated: 2026-06-12
 - 期望结果：完成一个可测试、可构建、可手动验证的本地房间工作台切片，并把 Feishu、多 runtime、显式 runtime resume 拆成后续 Feature。
 - 非目标或边界：不实现完整 Feishu Connector；不实现 Claude Code、OpenCode、Gemini CLI adapters；不建设 provider marketplace；不引入第二套消息总线或 UI 私有状态源。
 - Exit Gate 对照来源：本 Feature 的验收标准、F001/F002 总体目标、ADR-001、ADR-002，以及 EV-014。
+
+## Feature Intake
+
+- Original problem: 把架构骨架收敛为第一个可运行、可验证、可继续二次开发的本地产品化基线。
+- User pain point: 已有主链路能力分散，若没有里程碑 closeout，后续 agent 无法判断什么已经可信、什么仍是后续 Feature。
+- Capability promise: 交付 Web Console 五区工作台、本地主链路、connector ingress、startup recovery、follow-up Feature 拆分和 evidence。
+- Non-goals: 不实现 Feishu connector、多 runtime adapters 或 explicit runtime resume。
+- Acceptance source: User milestone request、F008 acceptance criteria、EV-014 verification commands。
+- Open questions: 剩余范围进入 F009/F010/F011。
+
+## Capability Contract
+
+- F008 只关闭第一个本地产品化基线，不扩张为完整远程 connector 或多 runtime 产品。
 
 ## Current Status
 
@@ -45,6 +58,18 @@ Completed.
 - [x] Stale Redis jobs whose invocation no longer exists in persistence are acknowledged so they cannot block current recovery or integration runs.
 - [x] Follow-up work is split into named Features for Feishu Connector, multi-runtime adapters, and explicit runtime resume.
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| First local product milestone is completed and verified | Feature acceptance criteria | EV-014 first local product milestone; pnpm.cmd test/build/public hygiene rerun on 2026-06-14 | completed |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | completed | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
@@ -55,6 +80,14 @@ Completed.
 ## Evidence
 
 - [EV-014 first local product milestone](../evidence/EV-014-first-local-product-milestone.md)
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: completed.
+- Known risks: 首次 pnpm.cmd test rerun 出现 transient host bootstrap timeout，focused rerun 与第二次全量 rerun 已通过。
+- Next safe action: 从 F009/F010/F011 选择一个后续 Feature 继续，不重新打开 F008 范围。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 

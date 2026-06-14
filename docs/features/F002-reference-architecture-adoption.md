@@ -3,7 +3,7 @@ id: F002
 doc_kind: feature
 status: active
 created: 2026-05-26
-updated: 2026-06-12
+updated: 2026-06-14
 ---
 
 # F002: Reference Architecture Adoption
@@ -19,6 +19,19 @@ updated: 2026-06-12
 - 期望结果：以 neutral capability map 表达 adoption order，将 invocation lifecycle、runtime binding、CLI subprocess invocation、streaming event normalization、mention routing、queue/slot control、session continuity、connector boundary、governance 等能力归属到本项目模块。
 - 非目标或边界：不公开私有参考源名称、URL、路径、commit、raw logs、产品身份或模块名；不在 Phase 1 建模型市场或宽泛 provider 平台。
 - Exit Gate 对照来源：本 Feature 的验收标准、ADR-001、EV-002，以及 EV-014。
+
+## Feature Intake
+
+- Original problem: 采用本地参考实现中已验证的工程能力，同时保持本项目自己的公开身份和模块边界。
+- User pain point: 直接复制参考项目会带入品牌、隐喻、provider 膨胀或第二套状态源，破坏 Equal-Room Host 初心。
+- Capability promise: 用 source-neutral capability map 和本项目模块边界吸收已验证能力。
+- Non-goals: 不公开参考源名称、URL、本地路径、产品身份或 fork 痕迹；不建设宽泛 provider 平台。
+- Acceptance source: ADR-001、F002 acceptance criteria、EV-002、EV-014。
+- Open questions: 后续 adoption 继续由 F009/F010/F011 承接。
+
+## Capability Contract
+
+- 参考能力只能映射到 Web Console、Host Runtime、Shared Protocol、Room Hub、Persistence、Event Bus、Agent Runtime、Runtime Adapter、Orchestration、Connector Interface 等中性边界。
 
 ## Current Status
 
@@ -53,6 +66,18 @@ Active as architecture umbrella.
 - [ ] Governance/bootstrap 只能临时 local bypass，不能被永久删除。
 - [ ] 后续计划必须先修正 architecture skeleton，再展开大规模实现。
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| Reference architecture adoption remains source-neutral | Feature acceptance criteria | EV-014 first local product milestone; EV-002 architecture mapping | active umbrella |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | active umbrella | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 None yet
@@ -69,6 +94,14 @@ None yet
 - [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) supports the adoption order by proving Shared Protocol, Persistence, Event Bus, Room Hub, mock Agent Runtime, Host API/WebSocket, and Web Console before Codex Adapter work.
 - [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md) supports the next adoption step by proving Codex Adapter execution after the mock main path and keeping slot control in Agent Runtime.
 - [EV-014 first local product milestone](../evidence/EV-014-first-local-product-milestone.md) supports source-neutral adoption closeout for the first local milestone: Connector Interface was added without implementing a concrete remote connector, Web Console remains a projection, stale Redis jobs are acknowledged safely, and follow-up runtime/connector work was split into named Features.
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: active umbrella.
+- Known risks: 公开文档和 UI 必须持续避免参考项目品牌、路径和隐喻泄漏。
+- Next safe action: 继续采用已验证能力时先对照本项目目标和 public hygiene gate。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 

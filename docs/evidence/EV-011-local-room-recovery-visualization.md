@@ -53,7 +53,7 @@ docker compose exec -T redis redis-cli -n 15 FLUSHDB
 $env:REDIS_URL='redis://127.0.0.1:6379/15'; pnpm.cmd test
 pnpm.cmd build
 python -m unittest tests.test_public_hygiene
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 ## Verification Results
@@ -69,7 +69,7 @@ knowledge_check.py --strict: Scanned 35 markdown file(s). Checked 18 knowledge a
 ## Harness Validation
 
 ```text
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 Scanned 35 markdown file(s). Checked 18 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 
@@ -93,7 +93,7 @@ Final re-review then found one more important projection bug: preserving an enti
 Manual visual verification used a local Vite dev server and controlled Host API seed message to render a `design_review_execute` round. Screenshot artifact:
 
 ```text
-E:\Self-Project\Multi-Agent-Assi\.tmp\f005-ui-review-fixed.png
+<repo>\.tmp\f005-ui-review-fixed.png
 ```
 
 The screenshot showed the room health strip, round progress, flattened round-step controls, recovery detail panel, and audit area without obvious text overlap or nested-card visual clutter at a 1440x1000 viewport.

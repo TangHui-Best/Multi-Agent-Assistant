@@ -50,7 +50,7 @@ bf1699a fix: address orchestration recovery review findings
 ```text
 pnpm.cmd build
 pnpm.cmd test
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 python -m unittest tests.test_public_hygiene
 $paths = @(git ls-files) + @(git ls-files --others --exclude-standard); python scripts\public_hygiene.py --root . @paths
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS=('PH_' + [guid]::NewGuid().ToString('N')); $paths = @(git ls-files) + @(git ls-files --others --exclude-standard); python scripts\public_hygiene.py --root . --require-rules --require-env-rules --require-commit-range --commit-range origin/main..HEAD @paths

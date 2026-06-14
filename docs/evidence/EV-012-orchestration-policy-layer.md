@@ -53,7 +53,7 @@ docker compose exec -T redis redis-cli -n 15 FLUSHDB
 pnpm.cmd build
 $env:REDIS_URL='redis://127.0.0.1:6379/15'; pnpm.cmd test
 python -m unittest tests.test_public_hygiene
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 ## Verification Results
@@ -71,7 +71,7 @@ knowledge_check.py --strict after EV-012 and F006 status update: Scanned 39 mark
 ## Harness Validation
 
 ```text
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 Scanned 39 markdown file(s). Checked 20 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 

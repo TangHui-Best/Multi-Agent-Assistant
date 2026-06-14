@@ -7,7 +7,7 @@ feature_ids:
 feature_refs:
   - docs/features/F008-first-local-product-milestone.md
 created: 2026-06-11
-updated: 2026-06-12
+updated: 2026-06-14
 ---
 
 # EV-014: First Local Product Milestone
@@ -39,6 +39,8 @@ ad6c94f docs: record local milestone closeout commit
 
 The final closeout batch also makes the Redis-only architecture skeleton test skip cleanly when Redis is unavailable, while preserving the full Redis integration path when Redis is reachable.
 
+The 2026-06-14 verification batch adds Harness schema alignment for existing Feature documents. It does not change the F008 product scope; it adds the current required `Feature Intake`, `Capability Contract`, `Acceptance Map`, `State Timeline`, and `Recovery Snapshot` sections to F001-F011 so current `knowledge_check.py --strict` can validate the project memory.
+
 ## Results
 
 Pass for the first local product milestone.
@@ -60,7 +62,12 @@ pnpm.cmd exec vitest run packages/agent-runtime/test/agentWorker.test.ts package
 pnpm.cmd test
 pnpm.cmd build
 python -m unittest tests.test_public_hygiene
-python C:\Users\HUAWEI\.codex\skills-backup\harness-before-f31d980-20260526-113424\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
+pnpm.cmd test
+pnpm.cmd build
+python -m unittest tests.test_public_hygiene
+python scripts\public_hygiene.py --require-env-rules
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 ## Verification Results
@@ -74,9 +81,16 @@ Current no-Redis pnpm.cmd test run: 12 test files passed, 1 Redis-only integrati
 pnpm.cmd build: passed; 8 workspace projects built, including connector-interface.
 python -m unittest tests.test_public_hygiene: Ran 10 tests, OK.
 knowledge_check.py --strict: Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnings: 0.
+2026-06-14 pnpm.cmd test: passed; 12 test files passed, 1 Redis-only integration file skipped; 110 tests passed, 1 skipped.
+2026-06-14 pnpm.cmd build: passed; 8 workspace projects built.
+2026-06-14 python -m unittest tests.test_public_hygiene: Ran 10 tests, OK.
+2026-06-14 python scripts\public_hygiene.py --require-env-rules: passed; 121 tracked files checked with 5 local env-injected sensitive rules.
+2026-06-14 current knowledge_check.py --strict: Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 
 `pnpm.cmd build` and `python -m unittest tests.test_public_hygiene` passed in a non-sandbox run in this Codex desktop environment. The sandboxed build had failed with `spawn EPERM` when `pnpm -r build` spawned child processes, and the sandboxed hygiene test had failed because Python temporary directories were created under an AppData temp path that the sandbox cannot write.
+
+During the 2026-06-14 verification, a first `pnpm.cmd test` run hit a transient 15s timeout in `apps/host/test/createServer.test.ts` for the bootstrap test while the same file and the focused test both passed immediately afterward. A second full `pnpm.cmd test` run passed. No production code change was made for that transient local scheduling signal.
 
 On 2026-06-13 Docker Desktop could not start `com.docker.service` from this session, so Redis was not available locally. The architecture skeleton integration test now performs a short Redis reachability check before constructing `createRedisEventBus`; if Redis is unavailable, only that Redis-only integration test is skipped. This prevents an environment outage from leaving unclosed Redis clients that can make unrelated Host API tests time out.
 
@@ -98,7 +112,7 @@ The in-app Browser tool was not exposed in the available tool list during this r
 ## Harness Validation
 
 ```text
-python C:\Users\HUAWEI\.codex\skills-backup\harness-before-f31d980-20260526-113424\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 

@@ -3,7 +3,7 @@ id: F007
 doc_kind: feature
 status: completed
 created: 2026-05-31
-updated: 2026-05-31
+updated: 2026-06-14
 ---
 
 # F007: Recovery Session Continuity 2.0
@@ -19,6 +19,19 @@ updated: 2026-05-31
 - 期望结果：重启后不依赖 Web/Redis 内存判断事实，Room Hub/Persistence 能 reconcile queued、running、succeeded、failed、canceled invocation 与 round/step；Web Console 能看见恢复动作留下的 audit/recovery evidence。
 - 非目标或边界：不自动执行 Codex `resume`，不做 retry/resume UI，不引入 Feishu，不扩 Claude/OpenCode/Gemini binding，不建设通用恢复平台，不让 connector 拥有核心状态。
 - Exit Gate 对照来源：本 Feature、F001、F004、F005、F006、ADR-002、EV-010、EV-011、EV-012，以及 `docs/superpowers/specs/2026-05-31-recovery-session-continuity-2.md`。
+
+## Feature Intake
+
+- Original problem: 重启后需要恢复已持久化的 thread/round/invocation continuity，而不是丢失 runtime 事实。
+- User pain point: 如果只依赖内存或单个 default-thread，重启后 agent 协作链路不可追踪。
+- Capability promise: 记录并展示 runtime session metadata，启动时按持久化 thread 恢复 continuity。
+- Non-goals: 不做自动 runtime resume；不让 Redis 成为持久事实源。
+- Acceptance source: F007 acceptance criteria、EV-013 recovery session continuity 2、EV-014 startup recovery。
+- Open questions: 显式 resume action 已拆到 F011。
+
+## Capability Contract
+
+- SQLite 保存恢复事实，Redis 只做运行时协调，Host startup 在 worker start 前恢复 persisted threads。
 
 ## Current Status
 
@@ -48,6 +61,18 @@ Completed. 本阶段完成 Feishu Connector 前的最后一个本地可靠性切
 - [x] Automatic runtime `resume` remains out of scope; captured session metadata is preserved as evidence for future explicit resume work.
 - [x] Automated tests cover queued re-enqueue, stale running failure, succeeded continuation, failed/canceled round settlement, idempotency, and Host startup wiring.
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| Startup recovery enumerates persisted threads before worker start | Feature acceptance criteria | EV-013 recovery session continuity 2; EV-014 first local product milestone | completed slice, explicit resume pending |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | completed slice, explicit resume pending | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
@@ -57,6 +82,14 @@ Completed. 本阶段完成 Feishu Connector 前的最后一个本地可靠性切
 ## Evidence
 
 [EV-013 recovery session continuity 2](../evidence/EV-013-recovery-session-continuity-2.md)
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: completed slice, explicit resume pending.
+- Known risks: Host bootstrap 当前仍面向默认线程视图，多线程产品导航待后续扩展。
+- Next safe action: 继续把自动 resume 视为 out of scope，通过 F011 设计显式用户授权。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 

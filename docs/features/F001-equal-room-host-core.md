@@ -3,7 +3,7 @@ id: F001
 doc_kind: feature
 status: active
 created: 2026-05-26
-updated: 2026-06-12
+updated: 2026-06-14
 ---
 
 # F001: Equal-Room Host Core
@@ -19,6 +19,19 @@ updated: 2026-06-12
 - 期望结果：Web Console、Host Runtime、Room Hub、Event Bus、Persistence、Agent Runtime、Runtime Adapter、Orchestration、Connector Interface 形成同一条主链路。
 - 非目标或边界：不是 subagent 调度器；不创建绕开 Room Hub 的 MVP；不让 Web、远程 connector 或移动端成为核心状态所有者；不把 Codex CLI 硬编码成唯一 runtime。
 - Exit Gate 对照来源：本 Feature 的验收标准、`AGENTS.md` 核心原则、F002 的架构映射，以及 EV-014。
+
+## Feature Intake
+
+- Original problem: 构建本地主力电脑上的 Equal-Room Host，让多个独立 agent runtime 以平等成员进入同一房间协作。
+- User pain point: 没有 Room Hub、Invocation、Event Bus、Persistence 主链路时，用户只能手动复制上下文，无法追踪执行事实和恢复状态。
+- Capability promise: 提供核心 room runtime 边界：用户输入进入 Room Hub，agent 执行创建 Invocation，实时输出进入 Event Bus，持久事实进入 SQLite。
+- Non-goals: 不是 subagent 调度器；不让 Web 或 connector 拥有核心状态；不把 Codex 写死为唯一 runtime。
+- Acceptance source: AGENTS.md、F001 acceptance criteria、F008 milestone evidence。
+- Open questions: 后续通过 F009/F010/F011 分别推进 Feishu connector、多 runtime adapter、显式 runtime resume。
+
+## Capability Contract
+
+- Room Hub、Invocation、Event Bus、Persistence、Agent Runtime、Connector Interface 共同组成 Equal-Room Host 核心能力边界。
 
 ## Current Status
 
@@ -55,6 +68,18 @@ Feishu Connector、多 runtime adapters、显式 runtime resume 不属于 F008 �
 - [ ] 单个 agent 失败、取消或超时不会破坏其他 agent 的上下文或整个房间状态。
 - [ ] 远程入口只能作为低信任 connector 复用核心 runtime，不拥有核心状态。
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| Equal-Room Host core has a verified first local baseline | Feature acceptance criteria | EV-014 first local product milestone | active umbrella |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | active umbrella | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 None yet
@@ -72,6 +97,14 @@ None yet
 - [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md) records Redis-backed slot lease integration in Agent Runtime and Event Bus pending/stale recovery.
 - [EV-011 local room recovery visualization](../evidence/EV-011-local-room-recovery-visualization.md) records the Web Console productization slice for round progress, recovery metadata, and invocation audit timeline.
 - [EV-014 first local product milestone](../evidence/EV-014-first-local-product-milestone.md) records the source-neutral first local product milestone, including persisted-thread startup recovery, Connector Interface, five-region room workbench UI, and stale Redis job recovery.
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: active umbrella.
+- Known risks: Umbrella Feature 仍有未完成长期能力，不能把 F008 误读为完整产品完成。
+- Next safe action: 继续通过 F009、F010、F011 推进，不直接扩张 F001 umbrella。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 

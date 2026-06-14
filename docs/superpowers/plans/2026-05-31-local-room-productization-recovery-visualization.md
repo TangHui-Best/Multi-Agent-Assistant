@@ -620,7 +620,7 @@ Run:
 ```powershell
 pnpm.cmd test
 pnpm.cmd build
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 python -m unittest tests.test_public_hygiene
 ```
 
@@ -672,7 +672,7 @@ Records the F005 implementation that makes persisted rounds, round steps, invoca
 ```text
 pnpm.cmd test
 pnpm.cmd build
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 python -m unittest tests.test_public_hygiene
 ```
 

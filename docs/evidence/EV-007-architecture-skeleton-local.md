@@ -24,7 +24,7 @@ Verified path:
 ## Commands
 
 ```text
-python C:\Users\HUAWEI\.codex\skills-backup\harness-before-f31d980-20260526-113424\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 git switch main
 git switch -c codex/phase1-skeleton-mainline
 git checkout codex/architecture-skeleton-v1 -- package.json pnpm-workspace.yaml tsconfig.base.json docker-compose.yml .env.example pnpm-lock.yaml packages

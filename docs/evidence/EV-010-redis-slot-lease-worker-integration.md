@@ -72,7 +72,7 @@ Stale-running focused run: packages/agent-runtime/test/agentWorker.test.ts passe
 pnpm.cmd --filter @multi-agent-assi/agent-runtime build: passed
 pnpm.cmd build: passed after review fixes and stale-running recovery
 pnpm.cmd test: initially caught mock worker expectations still assuming unguarded running status updates; after updating tests for CAS semantics, 11 test files passed, 67 tests passed; final run after stale-running recovery passed with 11 test files and 68 tests
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict: Scanned 31 markdown file(s). Checked 16 knowledge artifact(s). Errors: 0. Warnings: 0.
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict: Scanned 31 markdown file(s). Checked 16 knowledge artifact(s). Errors: 0. Warnings: 0.
 python -m unittest tests.test_public_hygiene: Ran 10 tests, OK
 public_hygiene.py tracked/untracked scan: passed, 96 file(s), 0 rule(s)
 public_hygiene.py env + commit-range scan: passed, 96 file(s), 1 rule(s)
