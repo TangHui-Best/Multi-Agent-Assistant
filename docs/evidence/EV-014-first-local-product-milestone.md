@@ -33,9 +33,10 @@ This evidence does not claim completion for a full Feishu connector, Claude Code
 0a395ea feat: add connector ingress and recover persisted threads
 fc52314 feat: productize room workbench shell
 3dbec81 fix: close local milestone recovery gap
+ad6c94f docs: record local milestone closeout commit
 ```
 
-The closeout batch contains stale Redis job recovery and F008/F009/F010/F011 documentation updates.
+The final closeout batch also makes the Redis-only architecture skeleton test skip cleanly when Redis is unavailable, while preserving the full Redis integration path when Redis is reachable.
 
 ## Results
 
@@ -67,13 +68,16 @@ python C:\Users\HUAWEI\.codex\skills-backup\harness-before-f31d980-20260526-1134
 Focused startup recovery + connector run: 3 test files passed, 10 tests passed.
 Web Console projection and shell run: 1 test file passed, 14 tests passed.
 Focused agent runtime stale-job run: 2 test files passed, 26 tests passed.
-pnpm.cmd test: 13 test files passed, 111 tests passed.
+Redis-available pnpm.cmd test run: 13 test files passed, 111 tests passed.
+Current no-Redis pnpm.cmd test run: 12 test files passed, 1 Redis-only integration file skipped; 110 tests passed, 1 skipped.
 pnpm.cmd build: passed; 8 workspace projects built, including connector-interface.
 python -m unittest tests.test_public_hygiene: Ran 10 tests, OK.
 knowledge_check.py --strict: Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 
 `pnpm.cmd build` and `python -m unittest tests.test_public_hygiene` passed in a non-sandbox run in this Codex desktop environment. The sandboxed build had failed with `spawn EPERM` when `pnpm -r build` spawned child processes, and the sandboxed hygiene test had failed because Python temporary directories were created under an AppData temp path that the sandbox cannot write.
+
+On 2026-06-13 Docker Desktop could not start `com.docker.service` from this session, so Redis was not available locally. The architecture skeleton integration test now performs a short Redis reachability check before constructing `createRedisEventBus`; if Redis is unavailable, only that Redis-only integration test is skipped. This prevents an environment outage from leaving unclosed Redis clients that can make unrelated Host API tests time out.
 
 ## Manual Verification
 
@@ -122,6 +126,8 @@ Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnin
 - `packages/agent-runtime/src/agentWorker.ts`
 - `packages/agent-runtime/test/agentWorker.test.ts`
 - `packages/agent-runtime/test/mockAgentWorker.test.ts`
+- `tests/integration/architecture-skeleton.test.ts`
+- `apps/host/test/createServer.test.ts`
 - `apps/web/src/App.tsx`
 - `apps/web/src/App.test.ts`
 - `apps/web/src/styles.css`

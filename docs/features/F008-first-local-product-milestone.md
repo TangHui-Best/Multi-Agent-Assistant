@@ -50,6 +50,7 @@ Completed.
 | Patch | Date | Commit | Symptom | Root Cause | Protection | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | F008.1 | 2026-06-12 | 3dbec81 | Redis stream could contain a job whose invocation no longer exists in the current SQLite persistence, causing a worker to keep seeing an unprocessable stale job. | Redis is runtime coordination, while SQLite is the persistent fact source; old stream entries can outlive an in-memory or reset persistence state. | `packages/agent-runtime/test/agentWorker.test.ts` covers missing-invocation stale jobs and asserts they are acked without acquiring a slot lease or running an adapter. | completed |
+| F008.2 | 2026-06-13 | pending closeout commit | `pnpm.cmd test` timed out when Redis was unavailable because the Redis-only architecture skeleton test created clients before failing, which could also delay unrelated Host API tests. | The integration test assumed Redis availability even though the milestone acceptance is Redis-available specific and local Docker may be down. | `tests/integration/architecture-skeleton.test.ts` checks Redis reachability before creating Redis clients; `apps/host/test/createServer.test.ts` has an explicit timeout budget for the bootstrap API assertion. | completed |
 
 ## Evidence
 

@@ -170,7 +170,7 @@ describe('host server', () => {
       roundSteps: harness.roundSteps,
     });
     await server.close();
-  });
+  }, 15_000);
 
   it('validates and submits user messages through Room Hub', async () => {
     const harness = createHarness();
