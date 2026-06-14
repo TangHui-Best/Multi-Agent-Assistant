@@ -34,6 +34,7 @@ This evidence does not claim completion for a full Feishu connector, Claude Code
 fc52314 feat: productize room workbench shell
 3dbec81 fix: close local milestone recovery gap
 ad6c94f docs: record local milestone closeout commit
+0d3ac5c test: skip redis integration when unavailable
 ```
 
 The final closeout batch also makes the Redis-only architecture skeleton test skip cleanly when Redis is unavailable, while preserving the full Redis integration path when Redis is reachable.
