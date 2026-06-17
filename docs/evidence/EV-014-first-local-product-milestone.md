@@ -7,7 +7,7 @@ feature_ids:
 feature_refs:
   - docs/features/F008-first-local-product-milestone.md
 created: 2026-06-11
-updated: 2026-06-14
+updated: 2026-06-17
 ---
 
 # EV-014: First Local Product Milestone
@@ -41,6 +41,8 @@ The final closeout batch also makes the Redis-only architecture skeleton test sk
 
 The 2026-06-14 verification batch adds Harness schema alignment for existing Feature documents. It does not change the F008 product scope; it adds the current required `Feature Intake`, `Capability Contract`, `Acceptance Map`, `State Timeline`, and `Recovery Snapshot` sections to F001-F011 so current `knowledge_check.py --strict` can validate the project memory.
 
+The 2026-06-17 closeout hardening batch closes the two previously conditional verification gaps: local private public-hygiene rules were restored outside tracked files, env-injected fail-closed hygiene was rerun, Redis was started through the project script, and the Redis-only architecture integration test ran instead of being skipped.
+
 ## Results
 
 Pass for the first local product milestone.
@@ -68,6 +70,12 @@ pnpm.cmd build
 python -m unittest tests.test_public_hygiene
 python scripts\public_hygiene.py --require-env-rules
 python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
+python scripts\public_hygiene.py --require-rules
+python scripts\public_hygiene.py --require-env-rules
+pnpm.cmd redis:up
+docker ps --filter "name=multi-agent-assi-redis-1" --format "{{.Names}} {{.Status}} {{.Ports}}"
+pnpm.cmd test
+pnpm.cmd build
 ```
 
 ## Verification Results
@@ -86,6 +94,12 @@ knowledge_check.py --strict: Scanned 48 markdown file(s). Checked 27 knowledge a
 2026-06-14 python -m unittest tests.test_public_hygiene: Ran 10 tests, OK.
 2026-06-14 python scripts\public_hygiene.py --require-env-rules: passed; 121 tracked files checked with 5 local env-injected sensitive rules.
 2026-06-14 current knowledge_check.py --strict: Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnings: 0.
+2026-06-17 python scripts\public_hygiene.py --require-rules: passed; 121 tracked files checked with 5 local sensitive rules loaded from ignored local configuration.
+2026-06-17 python scripts\public_hygiene.py --require-env-rules: passed; 121 tracked files checked with env-injected sensitive rules loaded. The command loaded both ignored local rules and env rules in this workspace.
+2026-06-17 pnpm.cmd redis:up: passed; Docker started `multi-agent-assi-redis-1` and exposed Redis on 6379.
+2026-06-17 docker ps Redis check: `multi-agent-assi-redis-1` was up and publishing port 6379.
+2026-06-17 pnpm.cmd test with Redis available: passed; 13 test files passed, 111 tests passed, 0 skipped. The Redis-only architecture skeleton integration test ran and passed.
+2026-06-17 pnpm.cmd build: passed; 8 workspace projects built.
 ```
 
 `pnpm.cmd build` and `python -m unittest tests.test_public_hygiene` passed in a non-sandbox run in this Codex desktop environment. The sandboxed build had failed with `spawn EPERM` when `pnpm -r build` spawned child processes, and the sandboxed hygiene test had failed because Python temporary directories were created under an AppData temp path that the sandbox cannot write.
@@ -118,7 +132,8 @@ Scanned 48 markdown file(s). Checked 27 knowledge artifact(s). Errors: 0. Warnin
 
 ## Residual Risks
 
-- Full `pnpm.cmd test` requires Redis availability. If Docker Desktop or Redis is not running, the integration architecture skeleton test will fail with `ECONNREFUSED 127.0.0.1:6379`.
+- Redis-backed verification now has current passing evidence from 2026-06-17. If Docker Desktop or Redis is not running in a future session, the Redis-only integration test is expected to skip rather than block unrelated test files; rerun with Redis available before release-grade claims.
+- Public hygiene strong verification depends on ignored local rules or env-injected rules. Do not move private identifiers into tracked docs or package metadata.
 - Host bootstrap still reads the default thread for the current local Web Console view. F008 removes the startup recovery correctness issue; full multi-thread Web navigation remains future product work.
 - Connector Interface is intentionally minimal and does not implement concrete Feishu authentication, signing, confirmation, or callback transport.
 - Web Console productization in F008 is a first source-neutral room workbench shell. It does not migrate a full reference UI component library.
