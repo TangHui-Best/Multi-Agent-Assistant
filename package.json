@@ -1,0 +1,24 @@
+{
+  "name": "multi-agent-assi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @multi-agent-assi/host --filter @multi-agent-assi/web dev",
+    "dev:host": "pnpm --filter @multi-agent-assi/host dev",
+    "dev:web": "pnpm --filter @multi-agent-assi/web dev",
+    "build": "pnpm -r build",
+    "test": "vitest run --passWithNoTests",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.8"
+  }
+}

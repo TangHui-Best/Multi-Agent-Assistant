@@ -22,7 +22,7 @@ python -m unittest tests.test_public_hygiene
 python scripts/public_hygiene.py --root .
 python scripts/public_hygiene.py --root . docs/superpowers/specs/2026-05-25-architecture-mapping-design.md
 $env:PUBLIC_HYGIENE_FORBIDDEN_PATTERNS='<redacted env rule not committed to repository>'; python scripts/public_hygiene.py --root . --require-rules --require-env-rules --require-commit-range --commit-range origin/main..HEAD
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs
 ```
 
 ## Results

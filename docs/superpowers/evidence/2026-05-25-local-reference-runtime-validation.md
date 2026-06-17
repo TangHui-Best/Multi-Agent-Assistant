@@ -64,7 +64,7 @@ Session evidence:
 Passed.
 
 ```text
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs
 Scanned 7 markdown file(s). Checked 1 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 

@@ -20,7 +20,7 @@ created: 2026-05-26
 ```text
 Invoke-RestMethod -Uri 'https://api.github.com/repos/TangHui-Best/Multi-Agent-Assistant/actions/runs?per_page=20' -Headers @{ 'User-Agent' = 'codex' } | ConvertTo-Json -Depth 6
 Open https://github.com/TangHui-Best/Multi-Agent-Assistant/actions/runs/26409981225
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs --strict
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs --strict
 ```
 
 ## Results

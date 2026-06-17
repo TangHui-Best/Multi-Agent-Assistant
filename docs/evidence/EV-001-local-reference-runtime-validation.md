@@ -28,7 +28,7 @@ POST /api/messages with a two-agent mention
 GET /api/messages?threadId=<thread-id>&limit=100
 GET /api/invocations/<invocation-id>
 Inspect private raw CLI archives and audit logs for the matching invocation ids.
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs
 ```
 
 ## Results
@@ -47,7 +47,7 @@ Pass, based on the original 2026-05-25 record.
 The original legacy evidence recorded:
 
 ```text
-python C:\Users\HUAWEI\.codex\skills\using-harness\scripts\knowledge_check.py --root E:\Self-Project\Multi-Agent-Assi --docs-path docs
+python <harness-skill>/scripts/knowledge_check.py --root <repo> --docs-path docs
 Scanned 7 markdown file(s). Checked 1 knowledge artifact(s). Errors: 0. Warnings: 0.
 ```
 

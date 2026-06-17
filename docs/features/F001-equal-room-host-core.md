@@ -3,26 +3,43 @@ id: F001
 doc_kind: feature
 status: active
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-06-14
 ---
 
 # F001: Equal-Room Host Core
 
 ## Goal
 
-构建运行在用户主力电脑上的 Multi-Agent Equal-Room Host，让多个独立 agent runtime 以平等协作者身份进入同一个房间工作，减少用户手动复制粘贴上下文的成本，同时保留上下文隔离、互相质疑、review、风险发现和用户最终收敛权。
+构建运行在用户主力电脑上的 Multi-Agent Equal-Room Host，让多个独立 agent runtime 以平等协作者身份进入同一个房间工作，减少用户手动复制上下文的成本，同时保留上下文隔离、互相质疑、review、风险发现和用户最终收敛权。
 
 ## Vision Anchor
 
 - 原始请求或来源：`AGENTS.md` 项目目标，以及 legacy 设计稿 `docs/superpowers/specs/2026-04-05-multi-codex-room-design.md`、`docs/superpowers/specs/2026-05-01-multi-codex-equal-room-host-design.md`、`docs/superpowers/specs/2026-05-24-independent-multi-codex-room-design.md`。
-- 用户痛点或工程问题：多个 agent 分散在不同 CLI/远程入口时，用户需要手动转述、复制输出、判断冲突，且缺少可追溯 invocation、持久事实源和恢复路径。
+- 用户痛点或工程问题：多个 agent 分散在不同 CLI 或远程入口时，用户需要手动转述、复制输出、判断冲突，且缺少可追溯 invocation、持久事实源和恢复路径。
 - 期望结果：Web Console、Host Runtime、Room Hub、Event Bus、Persistence、Agent Runtime、Runtime Adapter、Orchestration、Connector Interface 形成同一条主链路。
-- 非目标或边界：不是 subagent 调度器，不创建绕开 Room Hub 的 MVP，不让 Web/飞书/移动端成为核心状态所有者，不把 Codex CLI 硬编码成唯一 runtime。
-- Exit Gate 对照来源：本 Feature 的验收标准、`AGENTS.md` 核心原则，以及 F002 的架构映射。
+- 非目标或边界：不是 subagent 调度器；不创建绕开 Room Hub 的 MVP；不让 Web、远程 connector 或移动端成为核心状态所有者；不把 Codex CLI 硬编码成唯一 runtime。
+- Exit Gate 对照来源：本 Feature 的验收标准、`AGENTS.md` 核心原则、F002 的架构映射，以及 EV-014。
+
+## Feature Intake
+
+- Original problem: 构建本地主力电脑上的 Equal-Room Host，让多个独立 agent runtime 以平等成员进入同一房间协作。
+- User pain point: 没有 Room Hub、Invocation、Event Bus、Persistence 主链路时，用户只能手动复制上下文，无法追踪执行事实和恢复状态。
+- Capability promise: 提供核心 room runtime 边界：用户输入进入 Room Hub，agent 执行创建 Invocation，实时输出进入 Event Bus，持久事实进入 SQLite。
+- Non-goals: 不是 subagent 调度器；不让 Web 或 connector 拥有核心状态；不把 Codex 写死为唯一 runtime。
+- Acceptance source: AGENTS.md、F001 acceptance criteria、F008 milestone evidence。
+- Open questions: 后续通过 F009/F010/F011 分别推进 Feishu connector、多 runtime adapter、显式 runtime resume。
+
+## Capability Contract
+
+- Room Hub、Invocation、Event Bus、Persistence、Agent Runtime、Connector Interface 共同组成 Equal-Room Host 核心能力边界。
 
 ## Current Status
 
-In Progress。当前 canonical Feature 负责承载总体 Vision Anchor；存量详细 spec/plan 保留在 `docs/superpowers/**` 作为 legacy 历史材料。
+Active as umbrella.
+
+第一个本地产品化里程碑已由 [F008 first local product milestone](F008-first-local-product-milestone.md) 收束：核心 Room Hub / Invocation / Event Bus / SQLite / Redis / Agent Runtime 主链路、Codex Adapter、restart recovery、Connector Interface 基础和产品化 Web Console 已有可验证切片。
+
+Feishu Connector、多 runtime adapters、显式 runtime resume 不属于 F008 完成范围，已拆分为 F009、F010、F011。
 
 ## Links
 
@@ -33,8 +50,13 @@ In Progress。当前 canonical Feature 负责承载总体 Vision Anchor；存量
 - Rebaseline plan: [2026-05-26 architecture skeleton rebaseline](../superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md)
 - Legacy spec: [2026-05-24 independent multi-codex room design](../superpowers/specs/2026-05-24-independent-multi-codex-room-design.md)
 - Related Feature: [F002 reference architecture adoption](F002-reference-architecture-adoption.md)
+- Phase 2/3 plan: [2026-05-31 codex adapter and slot control](../superpowers/plans/2026-05-31-codex-adapter-slot-control.md)
 - Evidence: [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md)
 - Evidence: [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md)
+- Milestone Feature: [F008 first local product milestone](F008-first-local-product-milestone.md)
+- Follow-up Feature: [F009 Feishu connector](F009-feishu-connector.md)
+- Follow-up Feature: [F010 multi-runtime adapters](F010-multi-runtime-adapters.md)
+- Follow-up Feature: [F011 explicit runtime resume](F011-explicit-runtime-resume.md)
 
 ## Acceptance Criteria
 
@@ -46,6 +68,18 @@ In Progress。当前 canonical Feature 负责承载总体 Vision Anchor；存量
 - [ ] 单个 agent 失败、取消或超时不会破坏其他 agent 的上下文或整个房间状态。
 - [ ] 远程入口只能作为低信任 connector 复用核心 runtime，不拥有核心状态。
 
+## Acceptance Map
+
+| Claim | Acceptance | Evidence | Status |
+| --- | --- | --- | --- |
+| Equal-Room Host core has a verified first local baseline | Feature acceptance criteria | EV-014 first local product milestone | active umbrella |
+
+## State Timeline
+
+| Date | State | Trigger | Evidence | Note |
+| --- | --- | --- | --- | --- |
+| 2026-06-14 | active umbrella | Current Harness schema alignment | This Feature | Added required recovery-oriented Feature sections without changing scope. |
+
 ## Patch History
 
 None yet
@@ -55,10 +89,23 @@ None yet
 
 ## Evidence
 
-- [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md) 记录了本地参考运行时对多 Codex-bound agent、mention routing、invocation lifecycle、session continuity 的验证。
-- [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 记录本次 Harness canonical artifact 迁移和 strict validator 结果。
+- [EV-001 local reference runtime validation](../evidence/EV-001-local-reference-runtime-validation.md) 记录本地参考运行时对多 Codex-bound agent、mention routing、invocation lifecycle、session continuity 的验证。
+- [EV-004 harness knowledge migration](../evidence/EV-004-harness-knowledge-migration.md) 记录 Harness canonical artifact 迁移和 strict validator 结果。
 - [EV-006 architecture skeleton rebaseline](../evidence/EV-006-architecture-skeleton-rebaseline.md) 记录 Phase 1 skeleton 计划已按 canonical Feature/ADR 重新基线化。
+- [EV-007 architecture skeleton local runtime](../evidence/EV-007-architecture-skeleton-local.md) records the local Phase 1 skeleton runtime path through Web Console, Host API, Room Hub, SQLite, Redis, mock Agent Runtime, WebSocket, and back to Web Console.
+- [EV-008 codex adapter and slot control](../evidence/EV-008-codex-adapter-slot-control.md) records the first real Codex Adapter Room Hub path and in-process per-agent slot control evidence.
+- [EV-010 redis slot lease worker integration](../evidence/EV-010-redis-slot-lease-worker-integration.md) records Redis-backed slot lease integration in Agent Runtime and Event Bus pending/stale recovery.
+- [EV-011 local room recovery visualization](../evidence/EV-011-local-room-recovery-visualization.md) records the Web Console productization slice for round progress, recovery metadata, and invocation audit timeline.
+- [EV-014 first local product milestone](../evidence/EV-014-first-local-product-milestone.md) records the source-neutral first local product milestone, including persisted-thread startup recovery, Connector Interface, five-region room workbench UI, and stale Redis job recovery.
+
+## Recovery Snapshot
+
+- Read first: This Feature, linked ADR/spec/evidence, and AGENTS.md project rules.
+- Current capability state: active umbrella.
+- Known risks: Umbrella Feature 仍有未完成长期能力，不能把 F008 误读为完整产品完成。
+- Next safe action: 继续通过 F009、F010、F011 推进，不直接扩张 F001 umbrella。
+- Unblock condition: Scope, acceptance evidence, and safety boundaries are clear for the selected next slice.
 
 ## Next Step
 
-按 `docs/superpowers/plans/2026-05-26-architecture-skeleton-rebaseline.md` 执行 Phase 1 skeleton，先落 project-native Shared Protocol 和 mock main path，再进入 Codex Adapter。
+Continue F001 through the named follow-up Features instead of broadening this umbrella directly: F009 for Feishu Connector, F010 for additional runtime adapters, and F011 for explicit runtime resume.

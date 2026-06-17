@@ -1,6 +1,8 @@
 .agent/
+.agentmentor/
 .superpowers/
 .worktrees/
+.tmp/
 .public-hygiene/forbidden-patterns.local.txt
 node_modules/
 __pycache__/
@@ -10,3 +12,5 @@ coverage/
 playwright-report/
 test-results/
 *.log
+.data/
+apps/*/.data/

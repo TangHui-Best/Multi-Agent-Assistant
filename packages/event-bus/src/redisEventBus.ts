@@ -1,0 +1,183 @@
+import { Redis } from 'ioredis';
+import type { AgentJob, RoomEvent } from '@multi-agent-assi/shared';
+
+const ROOM_EVENTS_STREAM = 'mas:room-events';
+const AGENT_JOBS_STREAM = 'mas:agent-jobs';
+const AGENT_SLOT_LEASE_PREFIX = 'mas:agent-slot-lease:';
+const STALE_AGENT_JOB_IDLE_MS = 30_000;
+const AGENT_JOB_READ_COUNT = 10;
+const MAX_AGENT_JOB_CLAIM_PAGES = 16;
+
+type RedisStreamEntry = [streamId: string, fields: string[]];
+type RedisStreamReadResponse = Array<[stream: string, entries: RedisStreamEntry[]]>;
+type RedisAutoClaimResponse = [nextStart: string, entries: RedisStreamEntry[], deleted?: string[]];
+type RoomEventHandler = (event: RoomEvent) => void;
+
+const ROOM_EVENTS_PUBSUB_CHANNEL = 'mas:room-events:pubsub';
+
+export interface AgentJobEnvelope {
+  streamId: string;
+  job: AgentJob;
+}
+
+export interface EventBus {
+  publishRoomEvent(event: RoomEvent): Promise<void>;
+  enqueueAgentJob(job: AgentJob): Promise<void>;
+  readAgentJobs(consumerGroup: string, consumerName: string, blockMs: number): Promise<AgentJobEnvelope[]>;
+  ackAgentJob(consumerGroup: string, streamId: string): Promise<void>;
+  acquireAgentSlotLease(agentId: string, ownerId: string, ttlMs: number): Promise<boolean>;
+  releaseAgentSlotLease(agentId: string, ownerId: string): Promise<void>;
+  subscribeRoomEvents(onEvent: (event: RoomEvent) => void): Promise<() => Promise<void>>;
+  close(): Promise<void>;
+}
+
+export function createRedisEventBus(redisUrl: string): EventBus {
+  const redis = new Redis(redisUrl);
+  const subscriber = new Redis(redisUrl);
+  const roomEventHandlers = new Set<RoomEventHandler>();
+
+  const redisRoomEventHandler = (_channel: string, payload: string) => {
+    let event: RoomEvent;
+    try {
+      event = JSON.parse(payload) as RoomEvent;
+    } catch (err) {
+      console.warn('Ignoring invalid Redis room event payload', err);
+      return;
+    }
+
+    for (const handler of roomEventHandlers) {
+      handler(event);
+    }
+  };
+
+  async function ensureGroup(stream: string, group: string): Promise<void> {
+    try {
+      await redis.xgroup('CREATE', stream, group, '0', 'MKSTREAM');
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.includes('BUSYGROUP')) {
+        throw err;
+      }
+    }
+  }
+
+  function parseAgentJobEntries(entries: RedisStreamEntry[]): AgentJobEnvelope[] {
+    const jobs: AgentJobEnvelope[] = [];
+    for (const [streamId, fields] of entries) {
+      const jobFieldIndex = fields.findIndex((value) => value === 'job');
+      if (jobFieldIndex >= 0) {
+        try {
+          jobs.push({ streamId, job: JSON.parse(fields[jobFieldIndex + 1] ?? '{}') as AgentJob });
+        } catch (err) {
+          throw new Error(`Invalid agent job payload in Redis stream entry ${streamId}`, { cause: err });
+        }
+      }
+    }
+    return jobs;
+  }
+
+  function parseAgentJobReadResponse(response: RedisStreamReadResponse | null): AgentJobEnvelope[] {
+    if (!response) return [];
+    return response.flatMap(([, entries]) => parseAgentJobEntries(entries));
+  }
+
+  return {
+    async publishRoomEvent(event) {
+      await redis.xadd(ROOM_EVENTS_STREAM, '*', 'event', JSON.stringify(event));
+      await redis.publish(ROOM_EVENTS_PUBSUB_CHANNEL, JSON.stringify(event));
+    },
+
+    async enqueueAgentJob(job) {
+      await redis.xadd(AGENT_JOBS_STREAM, '*', 'job', JSON.stringify(job));
+    },
+
+    async readAgentJobs(consumerGroup, consumerName, blockMs) {
+      await ensureGroup(AGENT_JOBS_STREAM, consumerGroup);
+      const pendingResponse = (await redis.xreadgroup(
+        'GROUP',
+        consumerGroup,
+        consumerName,
+        'COUNT',
+        AGENT_JOB_READ_COUNT,
+        'STREAMS',
+        AGENT_JOBS_STREAM,
+        '0',
+      )) as RedisStreamReadResponse | null;
+      const pendingJobs = parseAgentJobReadResponse(pendingResponse);
+      if (pendingJobs.length > 0) return pendingJobs;
+
+      let claimCursor = '0-0';
+      for (let page = 0; page < MAX_AGENT_JOB_CLAIM_PAGES; page += 1) {
+        const staleResponse = (await redis.xautoclaim(
+          AGENT_JOBS_STREAM,
+          consumerGroup,
+          consumerName,
+          STALE_AGENT_JOB_IDLE_MS,
+          claimCursor,
+          'COUNT',
+          AGENT_JOB_READ_COUNT,
+        )) as RedisAutoClaimResponse;
+        const staleJobs = parseAgentJobEntries(staleResponse[1] ?? []);
+        if (staleJobs.length > 0) return staleJobs;
+        const nextCursor = staleResponse[0] ?? '0-0';
+        if (nextCursor === '0-0' || nextCursor === claimCursor) break;
+        claimCursor = nextCursor;
+      }
+
+      const response = (await redis.xreadgroup(
+        'GROUP',
+        consumerGroup,
+        consumerName,
+        'COUNT',
+        AGENT_JOB_READ_COUNT,
+        'BLOCK',
+        blockMs,
+        'STREAMS',
+        AGENT_JOBS_STREAM,
+        '>',
+      )) as RedisStreamReadResponse | null;
+      return parseAgentJobReadResponse(response);
+    },
+
+    async ackAgentJob(consumerGroup, streamId) {
+      await redis.xack(AGENT_JOBS_STREAM, consumerGroup, streamId);
+    },
+
+    async acquireAgentSlotLease(agentId, ownerId, ttlMs) {
+      const result = await redis.set(`${AGENT_SLOT_LEASE_PREFIX}${agentId}`, ownerId, 'PX', ttlMs, 'NX');
+      return result === 'OK';
+    },
+
+    async releaseAgentSlotLease(agentId, ownerId) {
+      const key = `${AGENT_SLOT_LEASE_PREFIX}${agentId}`;
+      await redis.eval(
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+        1,
+        key,
+        ownerId,
+      );
+    },
+
+    async subscribeRoomEvents(onEvent) {
+      if (roomEventHandlers.size === 0) {
+        subscriber.on('message', redisRoomEventHandler);
+        await subscriber.subscribe(ROOM_EVENTS_PUBSUB_CHANNEL);
+      }
+      roomEventHandlers.add(onEvent);
+      let isUnsubscribed = false;
+      return async () => {
+        if (isUnsubscribed) return;
+        isUnsubscribed = true;
+        roomEventHandlers.delete(onEvent);
+        if (roomEventHandlers.size === 0) {
+          subscriber.off('message', redisRoomEventHandler);
+          await subscriber.unsubscribe(ROOM_EVENTS_PUBSUB_CHANNEL);
+        }
+      };
+    },
+
+    async close() {
+      redis.disconnect();
+      subscriber.disconnect();
+    },
+  };
+}
